@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex, nofollow"/>
+<title>Бета-карта (MapLibre) — кадастр Новых регионов</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
+<style>
+  html,body{margin:0;height:100%;background:#0f1117;font-family:system-ui,sans-serif}
+  #map{position:absolute;inset:0}
+  #hud{position:absolute;top:10px;left:10px;z-index:5;background:rgba(15,17,23,.88);border:1px solid #2a2f42;border-radius:8px;padding:9px 11px;color:#d8dce8;font-size:12px;line-height:1.5;max-width:250px}
+  #hud b{color:#e8c547}
+  #hud a{color:#e8c547;text-decoration:none}
+  #hud a:hover{text-decoration:underline}
+  #hud .leg{display:flex;align-items:center;gap:6px;margin-top:3px;cursor:pointer;user-select:none}
+  #hud .leg input{margin:0;width:13px;height:13px;accent-color:#e8c547;flex-shrink:0}
+  #hud .leg.off{opacity:.4}
+  #hud .sw{width:11px;height:11px;border-radius:2px;flex-shrink:0}
+  #hud .back{display:inline-block;margin-bottom:7px;padding:3px 8px;border:1px solid #2a2f42;border-radius:5px}
+  #hud .bstat{font-family:ui-monospace,monospace;font-size:10px;color:#8b91a8;margin:3px 0 5px;display:flex;flex-wrap:wrap;gap:2px 10px}
+  #hud .bstat span{white-space:nowrap}
+  #hud .bstat b{color:#cdd2e0;font-weight:600}
+  #hud .bhint{margin-top:9px;border-top:1px solid #20242f;padding-top:7px;font-size:11px;color:#8b91a8;line-height:1.55}
+  #hud .bhint .nw{white-space:nowrap}
+  .maplibregl-popup-content{background:#181c27;color:#e8e8ea;border:1px solid #2a2f42;font-size:12px}
+  .maplibregl-popup-tip{border-top-color:#181c27!important;border-bottom-color:#181c27!important}
+  #zoomctl{position:absolute;right:10px;bottom:28px;z-index:5;display:flex;flex-direction:column;gap:2px}
+  #zoomctl button{width:34px;height:34px;background:rgba(15,17,23,.9);border:1px solid #2a2f42;color:#e8e8ea;font-size:20px;line-height:1;cursor:pointer;border-radius:6px}
+  #zoomctl button:hover{border-color:#e8c547;color:#e8c547}
+  #zoomctl button:active{transform:scale(.94)}
+  #search{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:6;width:300px;max-width:60vw}
+  #search input{width:100%;box-sizing:border-box;background:rgba(15,17,23,.92);border:1px solid #2a2f42;border-radius:7px;color:#e8e8ea;font-size:13px;padding:8px 11px;outline:none}
+  #search input:focus{border-color:#e8c547}
+  #qres{margin-top:3px;background:rgba(15,17,23,.96);border:1px solid #2a2f42;border-radius:7px;overflow:hidden}
+  #qres:empty{display:none}
+  .qrow{padding:7px 11px;font-size:12px;color:#e8e8ea;cursor:pointer;border-bottom:1px solid #20242f}
+  .qrow:last-child{border-bottom:none}
+  .qrow:hover{background:#1f2433}
+  .qrow.muted{color:#8b91a8;cursor:default}
+  #basket{position:absolute;left:10px;bottom:14px;z-index:6;display:flex;align-items:center;gap:8px;background:rgba(15,17,23,.9);border:1px solid #2a2f42;border-radius:8px;padding:7px 11px;color:#d8dce8;font-size:12px}
+  #basket b{color:#e8c547}
+  #basket button{background:transparent;border:1px solid #2a2f42;color:#d8dce8;font-size:11px;padding:3px 8px;border-radius:5px;cursor:pointer}
+  #basket button:hover{border-color:#e8c547;color:#e8c547}
+  #hud select,#hud input[list]{width:100%;box-sizing:border-box;margin-top:3px;background:#1f2433;color:#e8e8ea;border:1px solid #2a2f42;border-radius:5px;font-size:11px;padding:4px}
+  #fine-hint{position:absolute;top:58px;left:50%;transform:translateX(-50%);z-index:5;display:none;background:rgba(15,17,23,.92);border:1px solid #2a2f42;border-radius:6px;color:#e8c547;font-size:12px;padding:6px 12px;white-space:nowrap}
+  #hud .bt{background:#1f2433;color:#8b91a8;border:1px solid #2a2f42;font-size:11px;padding:3px 10px;cursor:pointer}
+  #hud .bt:first-child{border-radius:5px 0 0 5px}
+  #hud .bt:last-child{border-radius:0 5px 5px 0;border-left:none}
+  #hud .bt.on{background:#e8c547;color:#1a1a1a;border-color:#e8c547}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud">
+  <a class="back" href="index.html">← Основная карта</a>
+  <div><b>Бета-карта</b></div>
+  <div style="margin:5px 0 6px"><button class="bt" data-b="light">Светлая</button><button class="bt on" data-b="dark">Тёмная</button><button class="bt" data-b="sat">Спутник</button></div>
+  <div class="bstat"><span><b>2 730 177</b> уч</span><span><b>7 434 291</b> га</span><span><b>1901</b> сёл</span><span><b>82</b> р-нов</span><span><b>2 410</b> разм.</span></div>
+  <div style="color:#8b91a8;margin:6px 0 3px">Форма собственности:</div>
+  <label class="leg" data-o="p"><input type="checkbox" checked><span class="sw" style="background:#27ad60"></span>Частная</label>
+  <label class="leg" data-o="k"><input type="checkbox" checked><span class="sw" style="background:#c5a73c"></span>Коммунальная</label>
+  <label class="leg" data-o="g"><input type="checkbox" checked><span class="sw" style="background:#3f86d9"></span>Государственная</label>
+  <label class="leg" data-o="n"><input type="checkbox" checked><span class="sw" style="background:#d95e52"></span>Не определено</label>
+  <div style="margin-top:8px;border-top:1px solid #20242f;padding-top:7px">
+    <span style="color:#8b91a8">Категория земель:</span>
+    <select id="f-ct"><option value="">все</option></select>
+    <span style="color:#8b91a8;display:block;margin-top:5px">Арендатор:</span>
+    <input id="f-r" list="renters-dl" placeholder="имя или часть" autocomplete="off"/>
+    <datalist id="renters-dl"></datalist>
+    <span style="color:#8b91a8;display:block;margin-top:5px">Межевание (РФ кадастр):</span>
+    <select id="f-mz"><option value="">все</option><option value="yes">только размежёванные</option><option value="no">только без межевания</option></select>
+  </div>
+  <div class="bhint"><b>Клик</b> — данные участка<br><span class="nw"><b>Shift+клик / Shift+рамка</b> — в подборку</span></div>
+</div>
+<div id="fine-hint"></div>
+<div id="zoomctl"><button id="zin" aria-label="Приблизить">+</button><button id="zout" aria-label="Отдалить">−</button></div>
+<div id="search"><input id="q" type="text" placeholder="Село или кадастр 6520…:01:001:0001" autocomplete="off"/><div id="qres"></div></div>
+<div id="basket">📌 <b id="bk-count">0</b> уч. <button id="bk-exp">CSV</button><button id="bk-clr">Очистить</button></div>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+const OWN = { p:['Частная','#27ad60'], k:['Коммунальная','#c5a73c'], g:['Государственная','#3f86d9'], n:['Не определено','#d95e52'] };
+// Границы Новых регионов (Херсон + Запорожье, по экстенту 956 советов + запас) — стартовый кадр на весь экран
+const OBLAST_BOUNDS = [[31.30, 45.50], [40.50, 50.30]];   // [[з,ю],[в,с]] — Херсон+Запорожье+Донецк+Луганск
+// Тайлы .pbf пожаты gzip-ом (×3 по сети). GitHub Pages не ставит Content-Encoding → MapLibre сам не разжимает, поэтому протокол gz:// распаковывает на клиенте (нативный DecompressionStream). Не-сжатые .pbf тоже работают (проверка по сигнатуре 1f 8b).
+if (maplibregl.addProtocol) {
+  maplibregl.addProtocol('gz', async (params, abortController) => {
+    const signal = abortController && abortController.signal;
+    const resp = await fetch(params.url.replace(/^gz:\/\//, ''), signal ? { signal } : undefined);
+    if (resp.status === 404 || resp.status === 204) return { data: new Uint8Array(0) };   // пустой/отсутствующий тайл (края) — не ошибка
+    if (!resp.ok) throw new Error('tile ' + resp.status);
+    const buf = await resp.arrayBuffer();
+    const b = new Uint8Array(buf);
+    const data = (b.length >= 2 && b[0] === 0x1f && b[1] === 0x8b && window.DecompressionStream)
+      ? await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+      : buf;
+    return { data };
+  });
+}
+const map = new maplibregl.Map({
+  container: 'map',
+  attributionControl: false,
+  bounds: OBLAST_BOUNDS, fitBoundsOptions: { padding: 0 },   // вся область до краёв кадра (запас уже заложен в OBLAST_BOUNDS)
+  minZoom: 6,            // тайлсет участков теперь с z6 — стартовый fitBounds может уместить ВСЮ область даже на узких экранах (на старте setMinZoom фиксирует фактический зум — отдалять ниже нельзя)
+  maxZoom: 19,
+  fadeDuration: 0,
+  style: {
+    version: 8,
+    glyphs: location.origin + location.pathname.replace(/[^/]*$/, '') + 'fonts/{fontstack}/{range}.pbf',   // self-hosted (был openfreemap — блокировался/не грузился на части сетей → подписи пропадали)
+    sources: {
+      light: { type:'raster', tiles:['https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png','https://b.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png'], tileSize:256 },
+      base: { type:'raster', tiles:['https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png','https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png'], tileSize:256 },
+      sat: { type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:19 },
+      omt: { type:'vector', url:'https://tiles.openfreemap.org/planet', attribution:'© OpenMapTiles' },
+      parcels: { type:'vector', tiles:['gz://' + location.origin + location.pathname.replace(/[^/]*$/, '') + 'tiles/{z}/{x}/{y}.pbf'], minzoom:6, maxzoom:14, bounds:[31.30, 45.50, 40.50, 50.30] }   // экстент данных — MapLibre не дёргает пустые угловые тайлы
+    },
+    layers: [
+      { id:'light', type:'raster', source:'light', layout:{visibility:'none'} },
+      { id:'base', type:'raster', source:'base' },   // тёмная подложка — по умолчанию
+      { id:'sat', type:'raster', source:'sat', layout:{visibility:'none'} },
+      // parcels-fill / parcels-line добавляются отложенно (addParcels) — сначала рисуется подложка
+      { id:'lbl-water', type:'symbol', source:'omt', 'source-layer':'water_name',
+        layout:{ 'text-field':['coalesce',['get','name:ru'],['get','name']], 'text-font':['Noto Sans Italic'], 'text-size':['interpolate',['linear'],['zoom'],6,10,12,15], 'text-max-width':8 },
+        paint:{ 'text-color':'#8fb6e0', 'text-halo-color':'#0f1117', 'text-halo-width':1.1 } },
+      { id:'lbl-place', type:'symbol', source:'omt', 'source-layer':'place',
+        filter:['in',['get','class'],['literal',['city','town']]],
+        layout:{ 'text-field':['coalesce',['get','name:ru'],['get','name:latin'],['get','name']], 'text-font':['Noto Sans Regular'], 'text-size':['interpolate',['exponential',1.2],['zoom'],6,13.2,11,18], 'text-max-width':8 },
+        paint:{ 'text-color':'#eef1f6', 'text-halo-color':'#0f1117', 'text-halo-width':1.4 } },
+      { id:'lbl-state', type:'symbol', source:'omt', 'source-layer':'place',   // подписи СОСЕДНИХ областей — вдвое мельче и тусклее (наши области исключены — у них кастомный титул)
+        filter:['all',['==',['get','class'],'state'],['!',['in',['coalesce',['get','name:ru'],['get','name:latin'],['get','name']],['literal',['Запорожская область','Херсонская область','Донецкая область','Луганская область']]]]],
+        layout:{ 'text-field':['coalesce',['get','name:ru'],['get','name:latin'],['get','name']], 'text-font':['Noto Sans Regular'], 'text-size':['interpolate',['exponential',1.2],['zoom'],6,5.5,11,7.5], 'text-max-width':8 },
+        paint:{ 'text-color':'#eef1f6', 'text-opacity':0.5, 'text-halo-color':'#0f1117', 'text-halo-width':1.0 } }
+    ]
+  }
+});
+
+const zc = document.getElementById('zoomctl');
+const zoomStep = d => map.easeTo({ zoom: map.getZoom() + d, duration: 320, easing: t => t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2 });
+document.getElementById('zin').onclick  = () => zoomStep(+0.35);
+document.getElementById('zout').onclick = () => zoomStep(-0.35);
+const zoutBtn = document.getElementById('zout');
+function updateZoutBtn(){ const dis=map.getZoom()<=map.getMinZoom()+0.05; zoutBtn.style.opacity=dis?'.3':''; zoutBtn.style.pointerEvents=dis?'none':''; }
+map.on('zoom', updateZoutBtn);
+// Пан всегда включён, но строго в пределах Новых регионов (maxBounds в setupStart — за края уйти нельзя).
+let START_ZOOM = null;
+const PAN_BOUNDS = [[31.30, 45.50], [40.50, 50.30]];   // края парцел 4 областей +запас — за эту рамку пан не пускает
+function applyPanLock(){ map.dragPan.enable(); }   // пан всегда вкл; нужна для восстановления после Shift-рамки
+function clampCenter(){   // центр карты не выходит за пределы Херсонщины (за края не уехать) — БЕЗ привязки к зуму, поэтому minZoom 7.7 сохраняется
+  if(START_ZOOM == null) return;
+  const c=map.getCenter(), W=PAN_BOUNDS[0][0], S=PAN_BOUNDS[0][1], E=PAN_BOUNDS[1][0], N=PAN_BOUNDS[1][1];
+  const lng=Math.min(E,Math.max(W,c.lng)), lat=Math.min(N,Math.max(S,c.lat));
+  if(Math.abs(lng-c.lng)>1e-9 || Math.abs(lat-c.lat)>1e-9) map.setCenter([lng,lat]);
+}
+map.on('zoomend', applyPanLock);
+map.on('moveend', clampCenter);
+
+// ── Титул региона: герб + «Херсонская область» — фиксированный оверлей по центру канваса ──
+const TITLE_AWAY_ZOOM = 8.6;                 // zoom: ≤ — титул по центру; > — уезжает в правый верхний угол и остаётся там
+const regionTitleEl = document.createElement('div');
+regionTitleEl.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:4;pointer-events:none';
+regionTitleEl.innerHTML =
+  '<div class="rt-inner" style="display:flex;align-items:center;gap:9px;white-space:nowrap;will-change:transform;transition:transform .8s cubic-bezier(.35,0,.2,1)">' +
+    '<img src="gerb.svg" alt="" style="height:40px;width:auto;flex-shrink:0;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))">' +
+    '<span class="rt-text" style="font:800 27px/1 system-ui,sans-serif;letter-spacing:.3px">Новые регионы</span>' +
+  '</div>';
+const regionTitleInner = regionTitleEl.querySelector('.rt-inner');
+const regionTitleText = regionTitleEl.querySelector('.rt-text');
+document.getElementById('map').appendChild(regionTitleEl);
+// Уезжает в правый верхний угол и ОСТАЁТСЯ там видимым: инлайн-transform + статический transition (надёжно анимирует, без затухания)
+function updateRegionTitle(isLight){
+  if (isLight === undefined) isLight = document.querySelector('#hud .bt[data-b="light"]').classList.contains('on');
+  const away = map.getZoom() > TITLE_AWAY_ZOOM;   // при приближении — уезжает в правый верхний угол и остаётся там
+  regionTitleInner.style.transform = away ? 'translate(42vw,-44vh) scale(.62)' : 'translate(0,0) scale(1)';
+  regionTitleText.style.color = isLight ? '#1a2740' : '#eef1f6';
+  regionTitleText.style.textShadow = isLight
+    ? '0 1px 4px rgba(255,255,255,.95), 0 0 12px rgba(255,255,255,.8)'
+    : '0 1px 4px rgba(0,0,0,.9), 0 0 12px rgba(0,0,0,.7)';
+}
+map.on('zoom', updateRegionTitle);
+updateRegionTitle();
+
+// Переключатель подложки: светлая (voyager) / тёмная (CARTO dark) / спутник (Esri)
+function setBaseLabels(isLight){
+  const halo=isLight?'#ffffff':'#0f1117';
+  if(map.getLayer('lbl-place')){ map.setPaintProperty('lbl-place','text-color', isLight?'#1f2433':'#eef1f6'); map.setPaintProperty('lbl-place','text-halo-color',halo); }
+  if(map.getLayer('lbl-councils')){ map.setPaintProperty('lbl-councils','text-color', isLight?'#1f2433':'#eef1f6'); map.setPaintProperty('lbl-councils','text-halo-color',halo); }   // подписи сельсоветов (пгт/сёла)
+  if(map.getLayer('lbl-centers')){ map.setPaintProperty('lbl-centers','text-color', isLight?'#10182b':'#ffffff'); map.setPaintProperty('lbl-centers','text-halo-color',halo); }   // центры районов (болд ×1.5)
+  if(map.getLayer('lbl-state')){ map.setPaintProperty('lbl-state','text-color', isLight?'#1f2433':'#eef1f6'); map.setPaintProperty('lbl-state','text-halo-color',halo); }  // соседние области (text-opacity 0.5 задан в стиле)
+  if(map.getLayer('lbl-water')){ map.setPaintProperty('lbl-water','text-color', isLight?'#1c4f8a':'#8fb6e0'); map.setPaintProperty('lbl-water','text-halo-color',halo); }
+  if(typeof updateRegionTitle==='function') updateRegionTitle(isLight);   // титул региона подстраивает цвет под подложку
+}
+function setBase(which){
+  ['light','base','sat'].forEach(l=>{ if(map.getLayer(l)) map.setLayoutProperty(l,'visibility',
+    ((which==='light'&&l==='light')||(which==='dark'&&l==='base')||(which==='sat'&&l==='sat'))?'visible':'none'); });
+  setBaseLabels(which==='light');
+  document.querySelectorAll('#hud .bt[data-b]').forEach(b=>b.classList.toggle('on', b.dataset.b===which));
+}
+document.querySelectorAll('#hud .bt[data-b]').forEach(b=>b.onclick=()=>setBase(b.dataset.b));
+
+// ── Полный попап участка: индекс советов + point-in-polygon по оригиналам + ленивая подгрузка ──
+const BASE = location.origin + location.pathname.replace(/[^/]*$/, '');
+let CIDX = [];
+fetch(BASE + 'councils-index.json').then(r=>r.json()).then(d=>{ CIDX=d; addCouncilLabels(); }).catch(e=>console.warn('councils-index.json не загрузился — наших подписей (центры/сёла) не будет',e));
+// Выпуклая оболочка точек (Эндрю) — для приглушения подписей вне Херсонщины
+function convexHull(pts){
+  const p=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]); if(p.length<3) return p.concat([p[0]]);
+  const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]); const lo=[],up=[];
+  for(const q of p){ while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],q)<=0)lo.pop(); lo.push(q); }
+  for(let i=p.length-1;i>=0;i--){ const q=p[i]; while(up.length>=2&&cr(up[up.length-2],up[up.length-1],q)<=0)up.pop(); up.push(q); }
+  lo.pop(); up.pop(); const ring=lo.concat(up); ring.push(ring[0]); return ring;
+}
+const isUrban=n=>/^(смт|пгт|м\.|город)(\s|$)/i.test(n||'');   // урбан-НП; (\s|$) вместо \b (\b не срабатывает между кириллицей и пробелом)
+const BIG_TOWNS=new Set(['2310100000','2310700000','2310400000']);   // крупные города (Запорожье, Мелитополь, Бердянск) — whitelist по коду
+const OFFLOW={};   // сдвиг подписи (em) на обзоре — для Запорожья пока не задан
+// Подписи советов: обычные сёла/пгт + ГЛАВНЫЕ сёла/города районов (центры) болдом ×1.5 + приглушение чужих подписей (вне Херсонщины)
+function addCouncilLabels(){
+  if(!CIDX.length || !map.getLayer('lbl-place') || map.getSource('councils')) return;
+  const pts=CIDX.filter(c=>c.lat&&c.lon);
+  // районный центр = главное (макс. участков) урбан-НП района; если урбан нет — макс. участков
+  const centers=new Set(), byR={};
+  for(const c of pts){ const r=raionOf(c.c); if(r) (byR[r]=byR[r]||[]).push(c); }
+  const CITY_SEAT_RAIONS=new Set(['Бердянский район','Запорожский район','Мелитопольский район','Токмакский район']);   // центр — отдельный «город X»
+  const RAION_CENTER_CODE={'Акимовский район':'2320355100','Вольнянский район':'2321510100','Ореховский район':'2323910100'};   // явный райцентр (макс-по-участкам ≠ центр)
+  for(const r in byR){ if(r==='город Херсон'||CITY_SEAT_RAIONS.has(r)) continue;   // центр — отдельный город, село не промотим
+    if(RAION_CENTER_CODE[r]){ centers.add(RAION_CENTER_CODE[r]); continue; }
+    const g=byR[r], urb=g.filter(c=>isUrban(c.n)), pool=urb.length?urb:g;
+    const best=pool.reduce((a,b)=>(+b.total||0)>(+a.total||0)?b:a); if(best) centers.add(best.c); }
+  const LABEL_HIDE=new Set();   // (дубль-подписи для Запорожья пока не настроены)
+  const feats=pts.filter(c=>!LABEL_HIDE.has(c.c)).map(c=>({type:'Feature',geometry:{type:'Point',coordinates:[c.lon,c.lat]},properties:{name:ruName(c.n).replace(/^пгт\s+/i,''),total:c.total||0,ctr:centers.has(c.c),big:BIG_TOWNS.has(c.c),offLow:OFFLOW[c.c],rpfx:c.c.slice(2,5)}}));
+  // Херсон (~280k) отсутствует в данных как единый НП — добавляем вручную как центр (на обзоре виден)
+  /* Запорожье уже в данных как совет 2310100000 — ручная метка столицы не нужна, авто-центр выберет сам */   //   — волосяной пробел (звезда ближе к слову)
+  // Верхній Рогачик теперь в данных как совет 6521555100 (исправлено имя «Зелене»→«Верхній Рогачик» по Яндексу+КОАТУУ) — ручная точка убрана, авто-центр выберет его сам
+  // Велика Олександрівка (центр Великоалександровского р-на) отсутствует в данных — добавляем вручную как центр
+  /* убрана ручная метка Великой Александровки (Херсонщина) */
+  // Нововоронцовка: район 241 теперь есть в данных (смт + 12 сёл) — центр определяется автоматически, ручной плейсхолдер убран.
+  map.addSource('councils',{type:'geojson',data:{type:'FeatureCollection',features:feats}});
+  // обычные сёла/пгт (НЕ центры) — minzoom 9: на стартовом обзоре (z≈8–8.6) только райцентры (lbl-centers), сёла появляются при приближении
+  map.addLayer({ id:'lbl-councils', type:'symbol', source:'councils', minzoom:9, filter:['!',['get','ctr']],
+    layout:{ 'text-field':['get','name'], 'text-font':['Noto Sans Regular'], 'text-size':['interpolate',['linear'],['zoom'],8,11.4,12,14.4], 'text-max-width':7, 'symbol-sort-key':['-',['get','total']] },
+    paint:{ 'text-color':'#1f2433', 'text-halo-color':'#ffffff', 'text-halo-width':1.2 } });
+  // (2) ГЛАВНЫЕ сёла/города районов — БОЛД и ×1.5; вставлен ПЕРЕД lbl-place → приоритет коллизии (OMT-дубль уступает)
+  map.addLayer({ id:'lbl-centers', type:'symbol', source:'councils', minzoom:7, filter:['any',['get','ctr'],['get','big']],
+    layout:{ 'text-field':['get','name'], 'text-font':['Noto Sans Bold'], 'text-size':['interpolate',['linear'],['zoom'],8,['case',['==',['get','capital'],true],15.39,12.31],12,['case',['==',['get','capital'],true],19.44,15.55]], 'text-letter-spacing':['case',['==',['get','capital'],true],-0.02,0.06], 'text-offset':['step',['zoom'],['coalesce',['get','offLow'],['literal',[0,0]]],10,['literal',[0,0]]], 'text-max-width':8, 'symbol-sort-key':['-',['get','total']], 'text-allow-overlap':true },
+    paint:{ 'text-color':'#10182b', 'text-halo-color':'#ffffff', 'text-halo-width':1.7 } }, 'lbl-place');
+  // прозрачная зона наведения/клика вокруг райцентров — больше самой подписи (особенно на обзоре), чтобы легче попадать мышкой
+  map.addLayer({ id:'centers-hit', type:'circle', source:'councils', minzoom:7, filter:['get','ctr'],
+    paint:{ 'circle-radius':['interpolate',['linear'],['zoom'],8,22,11,15,14,11], 'circle-color':'#000', 'circle-opacity':0 } });
+  // (1) Приглушить OMT-подписи ВНЕ Херсонской области: оболочка советов → within (внутри opacity 1, снаружи 0.4)
+  const hull={type:'Polygon',coordinates:[convexHull(pts.map(c=>[c.lon,c.lat]))]};
+  // соседние НП, попадающие ВНУТРЬ выпуклой оболочки (реальная граница области вогнутая) — гасим принудительно
+  const OUT_OF_REGION=[];   // соседние НП внутри выпуклой оболочки — для Запорожья пока не задан
+  const nm=['coalesce',['get','name:ru'],['get','name:latin'],['get','name']];
+  // НП других областей (в ручном списке ИЛИ вне оболочки) — ещё тусклее и в ~1.5 раза мельче
+  const isOut=['any',['in',nm,['literal',OUT_OF_REGION]],['!',['within',hull]]];
+  map.setPaintProperty('lbl-place','text-opacity',['case',isOut,0.25,1]);
+  // zoom-interpolate снаружи, data-driven (свои/чужие) выходы внутри — чужие в ~1.5 раза мельче
+  map.setLayoutProperty('lbl-place','text-size',
+    ['interpolate',['exponential',1.2],['zoom'],6,['case',isOut,8.8,13.2],11,['case',isOut,12,18]]);
+  // (2) Убрать ДУБЛИ: вырезаем из OMT lbl-place названия, которые рисуем сами (центры/советы) — по name:ru, не по позиции
+  const bareRu=n=>{ const m=(n||'').match(/\(([^)]+)\)\s*$/); return m?m[1].trim():(n||''); };
+  const ourNames=[...new Set(pts.map(c=>bareRu(c.n)))];   // имена наших НП — вырезаем их дубли из OMT
+  map.setFilter('lbl-place',['all',['in',['get','class'],['literal',['city','town']]],['!',['in',nm,['literal',ourNames]]]]);
+  setBaseLabels(document.querySelector('#hud .bt[data-b="light"]').classList.contains('on'));
+}
+map.on('styledata', addCouncilLabels);   // если CIDX уже загружен — добавит, как только стиль готов
+const cjCache = {}, pfCache = {};
+async function councilParcels(code){ if(!cjCache[code]){ try{ const r=await fetch(BASE+'councils/'+code+'.json'); cjCache[code]=r.ok?((await r.json()).parcels||[]):[]; }catch(e){cjCache[code]=[];} } return cjCache[code]; }
+async function rawFeats(code){ if(!pfCache[code]){ try{ const r=await fetch(BASE+'parcels/'+code+'.geojson'); pfCache[code]=r.ok?((await r.json()).features||[]):[]; }catch(e){pfCache[code]=[];} } return pfCache[code]; }
+const PRE={'смт':'пгт','пгт':'пгт','м.':'г.','с.':'с.','х.':'х.'};
+function ruName(name){ const m=(name||'').match(/^(.*?)\s*\(([^)]+)\)\s*$/); if(!m) return name||''; const ua=m[1].trim(); const pm=ua.match(/^(смт|пгт|с\.|х\.|м\.)\s+/i); const pre=pm?((PRE[pm[1].toLowerCase()]||pm[1])+' '):''; return pre+m[2].trim(); }
+function ptInRing(x,y,r){ let inside=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const xi=r[i][0],yi=r[i][1],xj=r[j][0],yj=r[j][1]; if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside; } return inside; }
+function geomHas(g,x,y){ const f=rr=>ptInRing(x,y,rr[0])&&!rr.slice(1).some(h=>ptInRing(x,y,h)); if(g.type==='Polygon')return f(g.coordinates); if(g.type==='MultiPolygon')return g.coordinates.some(f); return false; }
+// Район РФ по кадастровому коду (как в основной карте) — code[2:5] → район
+const RAION_BY_PREFIX={"14000":"Павловка район","14101":"город Донецк","14102":"город Авдеевка","14103":"город Артёмовск","14106":"город Горловка","14109":"город Дебальцево","14112":"город Торецк","14113":"город Мирноград","14115":"город Доброполье","14116":"город Докучаевск","14117":"город Дружковка","14120":"город Енакиево","14121":"город Ждановка","14123":"город Мариуполь","14125":"город Кировское","14126":"город Константиновка","14129":"город Краматорск","14132":"город Покровск","14133":"город Лиман","14135":"город Макеевка","14136":"город Новогродовка","14138":"город Селидово","14141":"город Славянск","14144":"город Снежное","14147":"город Торез","14148":"город Угледар","14150":"город Харцызск","14153":"город Шахтёрск","14155":"город Ясиноватая","14203":"Александровка район","14206":"Василевка район","14209":"Новолуганское район","14212":"Великая Новосёлка район","14215":"Волноваха район","14217":"Володарское район","14220":"Новотроицкое район","14224":"Ильиновка район","14227":"Новопавловка район","14230":"Заречное район","14233":"Степное район","14236":"Новоазовск район","14239":"Белосарайская Коса район","14242":"Райгородок район","14245":"Новосёловка район","14248":"Тельманово район","14252":"Шевченко район","14255":"Первомайское район","23101":"город Запорожье","23104":"город Бердянск","23107":"город Мелитополь","23110":"город Токмак","23125":"город Энергодар","23203":"Акимовский район","23206":"Бердянский район","23209":"Васильевский район","23211":"Великобелозёрский район","23212":"Веселовский район","23215":"Вольнянский район","23218":"Гуляйпольский район","23221":"Запорожский район","23224":"Каменско-Днепровский район","23227":"Куйбышевский район","23230":"Мелитопольский район","23233":"Михайловский район","23236":"Новониколаевский район","23239":"Ореховский район","23242":"Пологовский район","23245":"Приазовский район","23248":"Приморский район","23249":"Розовский район","23252":"Токмакский район","23255":"Черниговский район","44000":"Жовтневый район","44101":"город Луганск","44103":"город Антрацит","44105":"город Брянка","44110":"город Кировск","44112":"город Алчевск","44114":"город Краснодон","44116":"город Красный Луч","44118":"город Лисичанск","44121":"город Первомайск","44123":"город Ровеньки","44125":"город Рубежное","44127":"город Свердловск","44129":"город Северодонецк","44131":"город Стаханов","44166":"город Красный Луч","44200":"Славяносербск район","44203":"Ивановка район","44205":"Курячовка район","44206":"Беловодск район","44209":"Белокуракино район","44214":"Хрящеватое район","44216":"Кременная район","44218":"Степовое район","44220":"Рассоховатое район","44222":"Луганск район","44223":"Проезжее район","44224":"Славяносербск район","44225":"Марковка район","44228":"Великоцк район","44231":"Новоайдар район","44233":"Новопсков район","44236":"Перевальск район","44238":"Подлесное район","44240":"Сватово район","44242":"Новоборовицы район","44245":"Славяносербск район","44248":"Ольховские Дачи район","44251":"Старобельск район","44254":"Троицкое район","44255":"Бондарное район","44603":"Луганск район","44866":"Роскошное район","65101":"город Херсон","65104":"Каховский район","65107":"город Новая Каховка","65201":"город Херсон","65203":"Белозёрский район","65206":"Бериславский район","65209":"Великоалександровский район","65211":"Генический район","65212":"Великолепетихский район","65215":"Верхнерогачикский район","65218":"Высокопольский район","65221":"Генический район","65223":"Голопристанский район","65226":"Горностаевский район","65229":"Ивановский район","65232":"Каланчакский район","65235":"Каховский район","65238":"Нижнесерогозский район","65241":"Нововоронцовский район","65244":"Новотроицкий район","65247":"Скадовский район","65250":"Алешкинский район","65254":"Чаплынский район"};
+const raionOf=code=>RAION_BY_PREFIX[(code||'').slice(0,5)]||'';
+let CAT_RU={};   // перевод «Назначение» укр→рус (фильтр — укр, попап — рус)
+fetch(BASE+'categories-ru.json').then(r=>r.json()).then(d=>{CAT_RU=d;}).catch(()=>{});
+const catRu=ct=>CAT_RU[ct]||ct||'';
+const OTC={'Приватна власність':['Частная собственность','#27ad60'],'Комунальна власність':['Коммунальная собственность','#c5a73c'],'Державна власність':['Государственная собственность','#3f86d9'],'Не визначено':['Не определено','#d95e52']};
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// Копирование кадастрового номера из попапа (как на основной карте)
+function fallbackCopy(text, ok){ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); ok(); }catch(e){} document.body.removeChild(ta); }
+function copyCad(btn, text){ const restore=btn.innerHTML; const ok=()=>{ btn.innerHTML='✓'; btn.style.color='#2ecc71'; btn.style.borderColor='#2ecc71'; setTimeout(()=>{ btn.innerHTML=restore; btn.style.color='#bbb'; btn.style.borderColor='rgba(255,255,255,0.25)'; },1100); }; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(ok).catch(()=>fallbackCopy(text,ok)); } else fallbackCopy(text,ok); }
+const copyBtn=(text,title)=>'<button onclick="copyCad(this,\''+text+'\')" title="'+title+'" aria-label="'+title+'" style="display:inline-flex;align-items:center;background:none;border:1px solid rgba(255,255,255,0.25);border-radius:3px;color:#bbb;cursor:pointer;padding:2px 5px;line-height:1;flex-shrink:0;vertical-align:middle"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>';
+function popupHTML(rec, cname){
+  const ot=OTC[rec.ot]||['—','#888']; let h='<div style="font-size:12px;line-height:1.5;max-width:300px;color:#e8e8ea">';
+  h+='<div style="display:flex;align-items:center;gap:6px"><span style="font-family:ui-monospace,monospace;color:#e8c547;font-weight:600;word-break:break-all">'+esc(rec.c)+'</span>'+copyBtn(rec.c,'Скопировать кадастр (УКР)')+'</div>';
+  h+='<div style="color:#8b91a8;font-size:11px;margin-bottom:4px">'+(cname?esc(cname):'')+(rec.a!=null?(cname?' · ':'')+rec.a+' га':'')+'</div>';
+  const rai=raionOf(rec.c); if(rai) h+='<div style="color:#8b91a8;font-size:11px;margin-bottom:4px;margin-top:-2px">'+esc(rai)+'</div>';
+  if(rec.o) h+='<div><span style="color:#8b91a8">собств.:</span> '+esc(rec.o)+'</div>';
+  h+='<div style="color:'+ot[1]+';font-size:10px;margin-top:4px">'+ot[0]+'</div>';
+  if(rec.ct) h+='<div style="color:#8b91a8;font-size:10px;margin-top:4px">Назначение: <span style="color:#cdd2e0">'+esc(catRu(rec.ct))+'</span></div>';
+  if(rec.use) h+='<div style="color:#8b91a8;font-size:10px;margin-top:2px">Использование: <span style="color:#cdd2e0">'+esc(rec.use)+'</span></div>';
+  if(rec.mz) h+='<div style="margin-top:5px;padding:4px 7px;background:rgba(192,80,255,.15);border:1px solid #c050ff;border-radius:3px"><div style="color:#c050ff;font-weight:600;font-size:11px">🇷🇺 Межевание сделано</div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:ui-monospace,monospace;font-size:11px;color:#fff;word-break:break-all">'+esc(rec.mz)+'</span>'+copyBtn(rec.mz,'Скопировать кадастр РФ')+'</div></div>';
+  return h+'</div>';
+}
+let boxDragged=false;
+map.on('click', 'parcels-fill', async e => {
+  if(boxDragged){ boxDragged=false; return; }            // после рамки клик не обрабатываем
+  const _lbls=['lbl-place'].concat(map.getLayer('lbl-councils')?['lbl-councils']:[]).concat(map.getLayer('lbl-centers')?['lbl-centers']:[]).concat(map.getLayer('centers-hit')?['centers-hit']:[]);
+  if(map.queryRenderedFeatures(e.point,{layers:_lbls}).length) return;   // клик по названию НП (OMT / наш совет / центр) → зум, не плашка участка
+  if(map.getZoom()<12.5) return;   // ниже z12.5 — только статичный приблизительный цвет; на сами полигоны (клик/детали) переключаемся с z12.5
+  const x=e.lngLat.lng, y=e.lngLat.lat, shift=e.originalEvent && e.originalEvent.shiftKey;
+  const popup = shift ? null : new maplibregl.Popup({maxWidth:'320px'}).setLngLat(e.lngLat).setHTML('<span style="font-size:12px;color:#8b91a8">загрузка…</span>').addTo(map);
+  const near=CIDX.filter(c=>Math.abs(c.lat-y)<0.25&&Math.abs(c.lon-x)<0.3).sort((a,b)=>((a.lat-y)**2+(a.lon-x)**2)-((b.lat-y)**2+(b.lon-x)**2)).slice(0,4);
+  for(const c of near){
+    const feats=await rawFeats(c.c);
+    const hit=feats.find(f=>f.geometry&&geomHas(f.geometry,x,y));
+    if(hit){ const cad=hit.properties.cadnum; const rec=(await councilParcels(c.c)).find(p=>p.c===cad)||{c:cad};
+      if(shift) basketToggle(cad, hit.geometry, rec, ruName(c.n));
+      else popup.setHTML(popupHTML(rec, ruName(c.n)));
+      return; }
+  }
+  if(!shift){ const o=OWN[e.features[0].properties.o]||['—','#888']; popup.setHTML('<div style="font-size:12px"><b style="color:'+o[1]+'">'+o[0]+'</b><div style="color:#8b91a8;font-size:10px;margin-top:2px">точный участок не найден</div></div>'); }
+});
+// Предзагрузка данных ближайшего совета при наведении → клик по участку открывается из кэша (быстрый попап)
+let lastPf='', pfQueued=false;
+function prefetchNear(ll){
+  if(!CIDX.length) return;
+  let best=null,bd=1e9; for(const c of CIDX){ const d=(c.lat-ll.lat)**2+(c.lon-ll.lng)**2; if(d<bd){bd=d;best=c;} }
+  if(!best || best.c===lastPf) return; lastPf=best.c;
+  rawFeats(best.c); councilParcels(best.c);   // прогрев кэша pfCache/cjCache (промис игнорируем)
+}
+map.on('mouseenter','parcels-fill',e=>{ map.getCanvas().style.cursor='pointer'; prefetchNear(e.lngLat); });
+map.on('mousemove','parcels-fill',e=>{ if(pfQueued) return; pfQueued=true; requestAnimationFrame(()=>{ pfQueued=false; prefetchNear(e.lngLat); }); });
+map.on('mouseleave','parcels-fill',()=>map.getCanvas().style.cursor='');
+
+// Зум так, чтобы в кадре было ~n ближайших НП (кликнутый — в центре)
+function fitNearestN(lng, lat, n){
+  const pts = CIDX.filter(c=>c.lat&&c.lon)
+    .map(c=>({c, d:(c.lat-lat)**2+(c.lon-lng)**2}))
+    .sort((a,b)=>a.d-b.d).slice(0, n).map(o=>o.c);
+  if(!pts.length){ map.easeTo({center:[lng,lat],duration:700,essential:true}); return; }
+  const rLon=Math.max(...pts.map(c=>Math.abs(c.lon-lng)));   // симметричная рамка вокруг кликнутого → он строго в центре
+  const rLat=Math.max(...pts.map(c=>Math.abs(c.lat-lat)));
+  const box=[[lng-rLon-.01,lat-rLat-.01],[lng+rLon+.01,lat+rLat+.01]];
+  const cam=map.cameraForBounds(box,{padding:40,maxZoom:14});
+  const z=Math.max(cam?cam.zoom:map.getZoom(), map.getZoom());   // кадрируем ровно N НП (drill 8→3→1 даёт приближение), не отдаляя
+  map.easeTo({center:[lng,lat], zoom:z, duration:700, essential:true});
+}
+// Прогрессивный drill по повторным кликам на ОДНО село: 1-й клик ~4 НП, 2-й — фикс zoom 12.5, 3-й — 1 (село по центру). Клик по другому селу / району — заново.
+let drillCode='', drillN=0; const DRILL_STEPS=[{n:4},{z:12.5},{n:1}];   // шаг: {n:кадр N сёл} или {z:фикс. зум}
+function drillVillage(lng, lat){
+  const nc=nearestCouncil(lng,lat).best, code=nc?nc.c:'_';
+  if(code===drillCode) drillN=Math.min(drillN+1, DRILL_STEPS.length-1); else { drillCode=code; drillN=0; }
+  const step=DRILL_STEPS[drillN];
+  if(step.z!=null) map.easeTo({center:[lng,lat], zoom:step.z, duration:700, essential:true});
+  else fitNearestN(lng, lat, step.n);
+}
+// Клик по названию города/села на карте → приближение сразу в его район (масштаб по типу НП)
+map.on('click','lbl-place', e=>{
+  const f=e.features&&e.features[0]; if(!f) return;
+  const cls=f.properties.class, lat=e.lngLat.lat, lng=e.lngLat.lng;
+
+  if(cls==='county'||cls==='district'){
+    // fitBounds на весь район: ближайший совет → raion-prefix → bounds всех советов
+    if(CIDX.length){
+      let best=null,bd=1e9;
+      for(const c of CIDX){ const d=(c.lat-lat)**2+(c.lon-lng)**2; if(d<bd){bd=d;best=c;} }
+      if(best){
+        const pfx=best.c.slice(2,5);
+        const rc=CIDX.filter(c=>c.c.slice(2,5)===pfx&&c.lat&&c.lon);
+        if(rc.length){
+          const los=rc.map(c=>c.lon), las=rc.map(c=>c.lat);   // фактический bbox района → весь район в кадре по максимуму
+          map.fitBounds([[Math.min(...los)-.05,Math.min(...las)-.05],[Math.max(...los)+.05,Math.max(...las)+.05]],{padding:22,duration:1600,essential:true});
+          return;
+        }
+      }
+    }
+    map.flyTo({center:e.lngLat,zoom:9,duration:1600,essential:true});
+    return;
+  }
+
+  // city/town/village/hamlet — прогрессивный drill (8 → 3 → 1) по повторным кликам
+  drillVillage(lng, lat);
+});
+// Наведение на НП → табличка форм собственности ближайшего совета (счётчики участков)
+const hoverPop = new maplibregl.Popup({ closeButton:false, closeOnClick:false, offset:12, maxWidth:'none', className:'rt-hover-pop' });
+document.head.insertAdjacentHTML('beforeend','<style>.rt-hover-pop{pointer-events:none}.rt-hover-pop .maplibregl-popup-content{padding:7px 9px}</style>');
+function ownTableHTML(c){
+  const o=c.o||{}, tot=c.total||0, ha=c.ha, rai=raionOf(c.c), cats=['p','k','g','n'];
+  const nums=cats.map(k=>'<div style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:'+OWN[k][1]+';flex-shrink:0"></span><b style="font-family:ui-monospace,monospace;color:#e8e8ea;font-weight:600">'+(o[k]||0).toLocaleString('ru')+'</b></div>').join('');
+  return '<div style="font-size:11px;line-height:1.5;min-width:190px">'
+    +'<div style="color:#e8c547;font-weight:600">'+esc(ruName(c.n))+'</div>'
+    +(rai?'<div style="color:#8b91a8;font-size:10px">'+esc(rai)+'</div>':'')
+    +'<div style="color:#cfd3df;font-family:ui-monospace,monospace;margin:3px 0 5px">'+tot.toLocaleString('ru')+' уч.'+(ha!=null?' · '+ha.toLocaleString('ru')+' га':'')+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:5px 13px">'+nums+'</div>'
+    +'</div>';
+}
+function nearestCouncil(lon,lat){ let best=null,bd=1e9; for(const c of CIDX){ const d=(c.lat-lat)**2+(c.lon-lon)**2; if(d<bd){bd=d;best=c;} } return {best,bd}; }
+function showHoverTable(ll){ if(!CIDX.length) return; const {best,bd}=nearestCouncil(ll[0],ll[1]); if(best && best.o && bd<0.04) hoverPop.setLngLat(ll).setHTML(ownTableHTML(best)).addTo(map); }   // в пределах ~22км (свои советы, не соседние области)
+// Агрегат по ВСЕМУ району (для наведения на райцентр)
+function raionTableHTML(rname){
+  const rc=CIDX.filter(c=>raionOf(c.c)===rname), cats=['p','k','g','n'], o={p:0,k:0,g:0,n:0}; let tot=0, ha=0;
+  for(const c of rc){ const co=c.o||{}; for(const k of cats) o[k]+=co[k]||0; tot+=c.total||0; ha+=c.ha||0; }
+  const nums=cats.map(k=>'<div style="display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:'+OWN[k][1]+';flex-shrink:0"></span><b style="font-family:ui-monospace,monospace;color:#e8e8ea;font-weight:600">'+o[k].toLocaleString('ru')+'</b></div>').join('');
+  return '<div style="font-size:11px;line-height:1.5;min-width:190px">'
+    +'<div style="color:#e8c547;font-weight:600">'+esc(rname)+'</div>'
+    +'<div style="color:#8b91a8;font-size:10px">'+rc.length+' НП · весь район</div>'
+    +'<div style="color:#cfd3df;font-family:ui-monospace,monospace;margin:3px 0 5px">'+tot.toLocaleString('ru')+' уч. · '+Math.round(ha).toLocaleString('ru')+' га</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:5px 13px">'+nums+'</div>'
+    +'</div>';
+}
+function showRaionTable(ll, rname){ if(!CIDX.length||!rname) return; hoverPop.setLngLat(ll).setHTML(raionTableHTML(rname)).addTo(map); }
+map.on('mouseenter','lbl-place', e=>{ map.getCanvas().style.cursor='pointer'; const f=e.features&&e.features[0]; if(f && ['city','town','village','hamlet'].includes(f.properties.class)) showHoverTable(f.geometry.coordinates); });
+map.on('mouseenter','lbl-councils', e=>{ map.getCanvas().style.cursor='pointer'; const f=e.features&&e.features[0]; if(f) showHoverTable(f.geometry.coordinates); });
+const clearHover=()=>{ map.getCanvas().style.cursor=''; hoverPop.remove(); };
+map.on('mouseleave','lbl-place', clearHover);
+map.on('mouseleave','lbl-councils', clearHover);
+// Клик по подписи совета (наш слой) → приближение к селу + соседним (как у lbl-place city/village)
+map.on('click','lbl-councils', e=>{ drillVillage(e.lngLat.lng, e.lngLat.lat); });
+// Райцентры: события на прозрачной хитзоне centers-hit (зона больше подписи). Наведение → данные ВСЕГО района; клик → плавный зум во весь район.
+map.on('mouseenter','centers-hit', e=>{
+  map.getCanvas().style.cursor='pointer';
+  const f=e.features&&e.features[0]; if(!f) return;
+  const rname=RAION_BY_PREFIX[f.properties.rpfx]; if(rname) showRaionTable(f.geometry.coordinates, rname);
+});
+map.on('mouseleave','centers-hit', clearHover);
+map.on('click','centers-hit', e=>{
+  const f=e.features&&e.features[0]; if(!f) return;
+  drillCode='';   // клик по району сбрасывает прогрессию drill по сёлам (следующий клик по селу — снова с ~8)
+  const co=f.geometry.coordinates, lng=co[0], lat=co[1];   // координаты самого центра (точнее точки клика в круге)
+  const rname=RAION_BY_PREFIX[f.properties.rpfx]||'';
+  const rc=(rname?CIDX.filter(c=>raionOf(c.c)===rname):[]).filter(c=>c.lat&&c.lon);
+  if(rc.length){
+    const los=rc.map(c=>c.lon), las=rc.map(c=>c.lat);   // фактический bbox района → весь район в кадре по максимуму
+    map.fitBounds([[Math.min(...los)-.05,Math.min(...las)-.05],[Math.max(...los)+.05,Math.max(...las)+.05]],{padding:22,duration:1600,essential:true});
+    return;
+  }
+  map.flyTo({center:[lng,lat],zoom:9,duration:1600,essential:true});
+});
+
+// Переключатели форм собственности — показать/скрыть по ВСЕЙ карте (вкл. частные)
+const ownActive = new Set(['p','k','g','n']);
+function applyOwnFilter(){
+  const f = ['in', ['get','o'], ['literal', [...ownActive]]];
+  if (map.getLayer('parcels-fill')) map.setFilter('parcels-fill', f);
+  if (map.getLayer('parcels-line')) map.setFilter('parcels-line', f);
+}
+document.querySelectorAll('#hud .leg[data-o]').forEach(lab => {
+  lab.querySelector('input').addEventListener('change', e => {
+    if (e.target.checked) ownActive.add(lab.dataset.o); else ownActive.delete(lab.dataset.o);
+    lab.classList.toggle('off', !e.target.checked);
+    applyOwnFilter();
+    if (typeof hasFine==='function' && hasFine()) fineUpdate();
+  });
+});
+
+// ── Поиск: село (рус/укр) или кадастровый номер ──
+const qEl=document.getElementById('q'), qres=document.getElementById('qres');
+const CAD_RE=/\d{10}:\d{2}:\d{3}:\d{4}/;
+function flyCouncil(c){ map.jumpTo({center:[c.lon,c.lat], zoom:13}); }
+async function flyCad(cad){
+  const code=cad.slice(0,10), c=CIDX.find(x=>x.c===code);
+  if(!c){ qres.innerHTML='<div class="qrow muted">совет не найден</div>'; return; }
+  map.jumpTo({center:[c.lon,c.lat], zoom:15});
+  const f=(await rawFeats(code)).find(ff=>ff.properties.cadnum===cad);
+  if(f){
+    const ring=f.geometry.type==='Polygon'?f.geometry.coordinates[0]:f.geometry.coordinates[0][0];
+    let sx=0,sy=0; ring.forEach(p=>{sx+=p[0];sy+=p[1];}); const cx=sx/ring.length, cy=sy/ring.length;
+    map.jumpTo({center:[cx,cy], zoom:17});
+    const rec=(await councilParcels(code)).find(p=>p.c===cad)||{c:cad};
+    new maplibregl.Popup({maxWidth:'320px'}).setLngLat([cx,cy]).setHTML(popupHTML(rec, ruName(c.n))).addTo(map);
+    qres.innerHTML='';
+  } else qres.innerHTML='<div class="qrow muted">участок не найден в совете</div>';
+}
+qEl.addEventListener('input', ()=>{
+  const v=qEl.value.trim(); if(!v){ qres.innerHTML=''; return; }
+  if(CAD_RE.test(v)){ qres.innerHTML='<div class="qrow muted">↵ Enter — найти участок</div>'; return; }
+  const low=v.toLowerCase();
+  const settle=CIDX.map((c,i)=>({c,i})).filter(o=>ruName(o.c.n).toLowerCase().includes(low)||(o.c.n||'').toLowerCase().includes(low)).slice(0,6);
+  const rent=RENTERS.filter(r=>r.toLowerCase().includes(low)).slice(0,5);
+  let html=settle.map(o=>'<div class="qrow" data-i="'+o.i+'">'+esc(ruName(o.c.n))+(raionOf(o.c.c)?' <span style="color:#8b91a8;font-size:10px">· '+esc(raionOf(o.c.c))+'</span>':'')+'</div>').join('');
+  html+=rent.map(r=>'<div class="qrow" data-r="'+esc(r)+'"><span style="color:#8b91a8;font-size:10px">аренд.</span> '+esc(r)+'</div>').join('');
+  qres.innerHTML = html || '<div class="qrow muted">ничего не найдено</div>';
+});
+qres.addEventListener('click', e=>{
+  const row=e.target.closest('.qrow'); if(!row) return;
+  if(row.dataset.i!==undefined){ const c=CIDX[+row.dataset.i]; flyCouncil(c); qEl.value=ruName(c.n); qres.innerHTML=''; }
+  else if(row.dataset.r){ const inp=document.getElementById('f-r'); inp.value=row.dataset.r; inp.dispatchEvent(new Event('change',{bubbles:true})); qEl.value=''; qres.innerHTML=''; }
+});
+qEl.addEventListener('keydown', e=>{ if(e.key!=='Enter') return; const m=qEl.value.match(CAD_RE); if(m){ flyCad(m[0]); return; } const first=qres.querySelector('.qrow[data-i]'); if(first){ const c=CIDX[+first.dataset.i]; flyCouncil(c); qEl.value=ruName(c.n); qres.innerHTML=''; } });
+
+// ── Подборка участков ──
+const basket = new Map();   // cadnum → {geom, rec, cname}
+function basketRefresh(){
+  const fc={type:'FeatureCollection',features:[...basket.values()].map(v=>({type:'Feature',geometry:v.geom,properties:{}}))};
+  const s=map.getSource('basket'); if(s) s.setData(fc);
+  document.getElementById('bk-count').textContent=basket.size;
+}
+function basketToggle(cad, geom, rec, cname){
+  if(basket.has(cad)) basket.delete(cad); else basket.set(cad,{geom,rec,cname});
+  basketRefresh();
+}
+const OWN_COLOR_EXPR=['match',['get','o'],'p','#27ad60','k','#c5a73c','g','#3f86d9','n','#d95e52','#747474'];   // −15% яркости (RGB×0.85) — заливка участков
+const EMPTY={type:'FeatureCollection',features:[]};
+// Слой участков добавляем отложенно — подложка успевает прорисоваться, тяжёлые .pbf не блокируют первый кадр
+let parcelsAdded=false;
+function addParcels(){
+  if(parcelsAdded || !map.getSource('parcels') || !map.getLayer('lbl-water')) return;   // ждём, пока стиль готов (есть базовый слой)
+  const before = 'lbl-water';   // под подписями; fine/basket добавятся выше
+  map.addLayer({ id:'parcels-fill', type:'fill', source:'parcels', 'source-layer':'parcels',
+    paint:{ 'fill-color':OWN_COLOR_EXPR, 'fill-opacity':0.5, 'fill-antialias':false } }, before);
+  // Обводка КАЖДОГО участка — чтобы соседние одного цвета не сливались (как на источнике).
+  // Толщина растёт с зумом; видна уже с z12.5 (тонко), к z16+ — чёткая граница.
+  map.addLayer({ id:'parcels-line', type:'line', source:'parcels', 'source-layer':'parcels', minzoom:12.5,
+    paint:{ 'line-color':'#0c0f17',
+      'line-width':['interpolate',['linear'],['zoom'], 12.5,0.25, 14,0.6, 16,1.3, 18,2.1, 20,3],
+      'line-opacity':['interpolate',['linear'],['zoom'], 12.5,0.35, 14,0.85, 16,0.95] } }, before);
+  parcelsAdded=true;   // флаг только ПОСЛЕ успешного addLayer — иначе повтор на следующем событии стиля
+  applyOwnFilter();
+}
+// Участки добавляем на самом раннем готовом стиле, НЕ дожидаясь медленного внешнего слоя подписей omt (из-за которого они раньше появлялись только при зуме).
+// styledata срабатывает как только стиль разобран; addParcels идемпотентен и retry-safe, вызов в load ниже — страховка.
+map.on('styledata', addParcels);
+// Размежёванные (РФ-кадастр): розовая/фиолетовая обводка. Тот же ранний триггер, что у участков — НЕ в load (иначе при медленном OMT слой не появлялся).
+let razmezhAdded=false;
+function addRazmezh(){
+  if(razmezhAdded || !map.getLayer('lbl-water')) return;   // ждём готовый стиль (есть базовый слой)
+  if(!map.getSource('razmezh')) map.addSource('razmezh',{type:'geojson',data: location.origin + location.pathname.replace(/[^/]*$/, '') + 'razmezh.geojson'});
+  map.addLayer({id:'razmezh-fill',type:'fill',source:'razmezh',paint:{'fill-color':'#c050ff','fill-opacity':['interpolate',['linear'],['zoom'],8,0.35,13,0]}},'lbl-water');
+  map.addLayer({id:'razmezh-line',type:'line',source:'razmezh',paint:{'line-color':'#c050ff','line-width':2.5}},'lbl-water');
+  razmezhAdded=true;   // флаг только после успешного addLayer
+}
+map.on('styledata', addRazmezh);
+map.on('load', ()=>{
+  addParcels();   // детерминированно: участки добавляются сразу после первого кадра подложки (без зависимости от idle/таймеров)
+  addRazmezh();   // страховка
+  // оверлей отфильтрованных участков (гибрид: подгрузка по зуму)
+  map.addSource('fine',{type:'geojson',data:EMPTY});
+  map.addLayer({id:'fine-fill',type:'fill',source:'fine',paint:{'fill-color':OWN_COLOR_EXPR,'fill-opacity':0.5,'fill-antialias':false}},'lbl-water');
+  map.addLayer({id:'fine-line',type:'line',source:'fine',paint:{'line-color':'#0c0f17','line-width':['interpolate',['linear'],['zoom'], 12.5,0.4, 14,0.8, 16,1.5, 18,2.3]}},'lbl-water');
+  // подсветка участка под курсором (как mouseover в оригинале)
+  map.addSource('hover',{type:'geojson',data:EMPTY});
+  map.addLayer({id:'hover-fill',type:'fill',source:'hover',paint:{'fill-color':'#ffffff','fill-opacity':0.18}});
+  map.addLayer({id:'hover-line',type:'line',source:'hover',paint:{'line-color':'#ffffff','line-width':2.2}});
+  // подборка — поверх всего
+  map.addSource('basket',{type:'geojson',data:EMPTY});
+  map.addLayer({id:'basket-fill',type:'fill',source:'basket',paint:{'fill-color':'#ffec3d','fill-opacity':0.45}});
+  map.addLayer({id:'basket-line',type:'line',source:'basket',paint:{'line-color':'#ffec3d','line-width':2}});
+  setBaseLabels(false);   // по умолчанию ТЁМНАЯ подложка → светлые подписи
+  // Старт на 1 пункт ближе «полной области»; зум-аут разрешён на 2 пункта (до fit−1), дальше заблокирован.
+  // cameraForBounds детерминированно считает зум подгонки (не зависит от текущей камеры/гонки раскладки).
+  let started=false;
+  const setupStart = ()=>{
+    if(started) return;
+    const cam = map.cameraForBounds(KHERSON_BOUNDS, { padding: 0 });
+    if(!cam || !isFinite(cam.zoom)) return;   // контейнер ещё не разложен — повторим по таймеру
+    started=true;
+    const fz = cam.zoom;                       // «вся область в кадре»
+    const zOverride = parseFloat((new URLSearchParams(location.search).get('z')||'').replace(/[^0-9.]/g,''));   // тест: ?z=8.0; терпим к мусору (?z=**7.5* и пр.)
+    START_ZOOM = isFinite(zOverride) && zOverride > 0 ? zOverride : 8.3;   // по умолчанию старт 8.3 (как ?z=8.3)
+    map.setMinZoom(7.7);                       // 7.7 — минимум зум-аута, дальше отдалять нельзя (за края не уехать — clampCenter на moveend)
+    map.jumpTo({ center: cam.center, zoom: START_ZOOM });
+    // подписи сёл — только при приближении (выше старта), на обзоре остаются лишь райцентры
+    if(map.getLayer('lbl-councils')) map.setLayoutProperty('lbl-councils','minzoom', fz + 1.6);
+    updateZoutBtn(); applyPanLock();
+  };
+  map.once('idle', setupStart);
+  setTimeout(setupStart, 300);
+  setTimeout(setupStart, 800);   // страховка, если контейнер разложился позже
+});
+
+// Рамка-выделение: Shift+перетаскивание
+map.boxZoom.disable();
+let bs=null, bsRect=null;
+map.on('mousedown', e=>{ if(!e.originalEvent.shiftKey){ boxDragged=false; return; } bs={x:e.point.x,y:e.point.y,ll:e.lngLat}; map.dragPan.disable(); });   // сбрасываем флаг на обычном mousedown: после рамки >3px нативный click не дублируется (clickTolerance) и флаг иначе залипает, глотая след. клик
+map.on('mousemove', e=>{ if(!bs) return; if(!bsRect){ bsRect=document.createElement('div'); document.body.appendChild(bsRect); } const x0=Math.min(bs.x,e.point.x),y0=Math.min(bs.y,e.point.y),w=Math.abs(e.point.x-bs.x),h=Math.abs(e.point.y-bs.y); const r=map.getCanvas().getBoundingClientRect(); bsRect.style.cssText='position:fixed;border:1px dashed #e8c547;background:rgba(232,197,71,.12);z-index:7;pointer-events:none;left:'+(r.left+x0)+'px;top:'+(r.top+y0)+'px;width:'+w+'px;height:'+h+'px'; });
+map.on('mouseup', async e=>{
+  const start=bs, rect=bsRect; bs=null; bsRect=null; applyPanLock(); if(rect) rect.remove();
+  if(!start) return;
+  if(Math.abs(e.point.x-start.x)<4 && Math.abs(e.point.y-start.y)<4) return;  // это клик, не рамка
+  boxDragged=true;
+  const a=start.ll,b=e.lngLat; const minx=Math.min(a.lng,b.lng),maxx=Math.max(a.lng,b.lng),miny=Math.min(a.lat,b.lat),maxy=Math.max(a.lat,b.lat);
+  const cs=CIDX.filter(c=>c.lat>=miny-0.05&&c.lat<=maxy+0.05&&c.lon>=minx-0.05&&c.lon<=maxx+0.05).slice(0,12);
+  for(const c of cs){ const feats=await rawFeats(c.c); const ri={}; (await councilParcels(c.c)).forEach(p=>ri[p.c]=p);
+    for(const f of feats){ const g=f.geometry; if(!g) continue; const ring=g.type==='Polygon'?g.coordinates[0]:g.coordinates[0][0]; let sx=0,sy=0; ring.forEach(p=>{sx+=p[0];sy+=p[1];}); const cx=sx/ring.length, cy=sy/ring.length;
+      if(cx>=minx&&cx<=maxx&&cy>=miny&&cy<=maxy){ const cad=f.properties.cadnum; if(!basket.has(cad)) basket.set(cad,{geom:g,rec:ri[cad]||{c:cad},cname:ruName(c.n)}); } }
+  }
+  basketRefresh();
+});
+
+document.getElementById('bk-clr').onclick=()=>{ basket.clear(); basketRefresh(); };
+document.getElementById('bk-exp').onclick=()=>{
+  if(!basket.size) return;
+  const rows=[['cadnum','area_ga','ownership','council','renter','owner']];
+  for(const [cad,v] of basket){ const r=v.rec||{}; rows.push([cad, r.a==null?'':r.a, OTC[r.ot]?OTC[r.ot][0]:(r.ot||''), v.cname||'', r.r||'', r.o||'']); }
+  const csv='﻿'+rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(';')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='podborka.csv'; a.click(); URL.revokeObjectURL(a.href);
+};
+
+// ── Тонкие фильтры (гибрид): при приближении грузим данные совета и показываем только подходящие ──
+const OTC2={'Приватна власність':'p','Комунальна власність':'k','Державна власність':'g','Не визначено':'n'};
+const fine={ mz:'', ct:'', ly:'', r:'' };  // межевание | категория | год аренды | арендатор
+let RENTC={}, RENTERS=[];
+function hasFine(){ return !!(fine.mz||fine.ct||fine.ly||fine.r); }
+function matchLease(rec){ const y=rec.ey; if(fine.ly==='none') return !y; if(fine.ly==='expired') return y&&y<2026; if(fine.ly==='2030+') return y&&y>=2030; return y&&String(y)===fine.ly; }
+const FINE_MINZOOM=13;
+function fineHint(t){ const el=document.getElementById('fine-hint'); if(!el) return; el.textContent=t||''; el.style.display=t?'block':'none'; }
+let fineRun=false, finePend=false;
+// Межевание — глобальный слой razmezh (есть на всех зумах), поэтому фильтр работает и на старте без порога зума
+function setRazmezh(mz){
+  if(!map.getLayer('razmezh-fill')) return;
+  if(mz==='yes'){   // только размежёванные — БЕЗ заливки, только розовый ободок (как в оригинале)
+    map.setLayoutProperty('razmezh-fill','visibility','none');
+    map.setLayoutProperty('razmezh-line','visibility','visible');
+    map.setPaintProperty('razmezh-line','line-width',['interpolate',['linear'],['zoom'],6,0.7,10,1.3,14,2.4]);
+  } else if(mz==='no'){   // только без межевания — слой межевания скрыт
+    map.setLayoutProperty('razmezh-fill','visibility','none'); map.setLayoutProperty('razmezh-line','visibility','none');
+  } else {   // по умолчанию — лёгкая заливка, гаснущая к z13 (как было)
+    map.setLayoutProperty('razmezh-fill','visibility','visible'); map.setLayoutProperty('razmezh-line','visibility','visible');
+    map.setPaintProperty('razmezh-fill','fill-opacity',['interpolate',['linear'],['zoom'],8,0.35,13,0]);
+    map.setPaintProperty('razmezh-line','line-width',2.5);
+  }
+}
+async function fineUpdate(){
+  if(fineRun){ finePend=true; return; }
+  fineRun=true;
+  try{
+    do{
+      finePend=false;
+      setRazmezh(fine.mz);
+      const otherFine = !!(fine.ct||fine.ly||fine.r);   // эти фильтры требуют поучастковых данных → порог z13
+      // Только межевание (или ничего) — работает на любом зуме через глобальный razmezh, без подсказки
+      if(!otherFine){
+        map.getSource('fine')&&map.getSource('fine').setData(EMPTY); fineHint('');
+        const hideMain = fine.mz==='yes';   // показываем ТОЛЬКО размежёванные → прячем основной слой участков
+        if(map.getLayer('parcels-fill')) map.setLayoutProperty('parcels-fill','visibility', hideMain?'none':'visible');
+        if(map.getLayer('parcels-line')) map.setLayoutProperty('parcels-line','visibility', hideMain?'none':'visible');
+        break;
+      }
+      const overlay = map.getZoom()>=FINE_MINZOOM;
+      if(map.getLayer('parcels-fill')) map.setLayoutProperty('parcels-fill','visibility', overlay?'none':'visible');
+      if(map.getLayer('parcels-line')) map.setLayoutProperty('parcels-line','visibility', overlay?'none':'visible');
+      if(!overlay){ map.getSource('fine')&&map.getSource('fine').setData(EMPTY); fineHint('Приблизьте, чтобы применить фильтр'); break; }
+      fineHint('');
+      const b=map.getBounds(); const cs=CIDX.filter(c=>b.contains([c.lon,c.lat])).slice(0,14);
+      const feats=[];
+      for(const c of cs){
+        const fs=await rawFeats(c.c); const ri={}; (await councilParcels(c.c)).forEach(p=>ri[p.c]=p);
+        for(const f of fs){ const rec=ri[f.properties.cadnum]; if(!rec||!f.geometry) continue;
+          const oc=OTC2[rec.ot]||'n';
+          if(!ownActive.has(oc)) continue;
+          if(fine.ct && rec.ct!==fine.ct) continue;
+          if(fine.ly && !matchLease(rec)) continue;
+          if(fine.r && !(rec.r && rec.r.toLowerCase().includes(fine.r.toLowerCase()))) continue;
+          if(fine.mz==='yes' && !rec.mz) continue;
+          if(fine.mz==='no' && rec.mz) continue;
+          feats.push({type:'Feature',geometry:f.geometry,properties:{o:oc}}); }
+      }
+      map.getSource('fine')&&map.getSource('fine').setData({type:'FeatureCollection',features:feats});
+    } while(finePend && hasFine());
+  } finally { fineRun=false; }
+}
+document.getElementById('f-mz').addEventListener('change', e=>{ fine.mz=e.target.value; fineUpdate(); });
+document.getElementById('f-ct').addEventListener('change', e=>{ fine.ct=e.target.value; fineUpdate(); });
+fetch(BASE+'filters-beta.json').then(r=>r.json()).then(F=>{
+  const ct=document.getElementById('f-ct');
+  (F.categories||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c.length>52?c.slice(0,50)+'…':c; ct.appendChild(o); });
+  const dl=document.getElementById('renters-dl');
+  (F.renters||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r; dl.appendChild(o); });
+  RENTC=F.renter_councils||{}; RENTERS=F.renters||[];
+}).catch(()=>{});
+document.getElementById('f-r').addEventListener('change', e=>{
+  fine.r=e.target.value.trim();
+  const codes=RENTC[fine.r];                       // точное имя → перелёт к его советам
+  if(codes && codes.length){ const pts=codes.map(cc=>CIDX.find(x=>x.c===cc)).filter(Boolean); if(pts.length){ const lo=pts.map(p=>p.lon),la=pts.map(p=>p.lat); map.fitBounds([[Math.min(...lo),Math.min(...la)],[Math.max(...lo),Math.max(...la)]],{padding:60,maxZoom:14,duration:0}); } }
+  fineUpdate();
+});
+map.on('moveend', ()=>{ if(hasFine()) fineUpdate(); });
+
+// Подсветка участка под курсором — белая обводка (как mouseover в оригинале)
+let _hov=false;
+map.on('mousemove', e=>{
+  if(bs) return;                                   // во время Shift-рамки не подсвечиваем
+  const src=map.getSource('hover'); if(!src) return;
+  if(map.getZoom()<12.5){ if(_hov){ src.setData(EMPTY); _hov=false; } return; }
+  const lyrs=['parcels-fill','fine-fill'].filter(id=>map.getLayer(id));
+  const f=lyrs.length ? map.queryRenderedFeatures(e.point,{layers:lyrs}) : [];
+  if(f.length){ src.setData({type:'Feature',geometry:f[0].geometry,properties:{}}); _hov=true; map.getCanvas().style.cursor='pointer'; }
+  else if(_hov){ src.setData(EMPTY); _hov=false; map.getCanvas().style.cursor=''; }
+});
+map.on('mouseout', ()=>{ const src=map.getSource('hover'); if(src&&_hov){ src.setData(EMPTY); _hov=false; } });
+</script>
+</body>
+</html>

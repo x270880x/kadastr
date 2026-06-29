@@ -1,0 +1,16 @@
+{
+"name": "New Regions parcels",
+"description": "New Regions parcels",
+"version": "2",
+"minzoom": "6",
+"maxzoom": "14",
+"center": "37.496338,47.062638,14",
+"bounds": "31.530253,45.768354,40.227673,50.088178",
+"antimeridian_adjusted_bounds": "31.530253,45.768354,40.227673,50.088178",
+"type": "overlay",
+"strategies": "[{},{},{},{},{},{},{\"dropped_as_needed\":2314723,\"tiny_polygons\":548821,\"feature_count_desired\":704483},{\"dropped_as_needed\":1979239,\"tiny_polygons\":633353,\"feature_count_desired\":454162},{\"dropped_as_needed\":1047585,\"tiny_polygons\":675766,\"feature_count_desired\":245404},{\"tiny_polygons\":580747},{\"tiny_polygons\":242649},{\"tiny_polygons\":181196},{\"tiny_polygons\":112918},{\"tiny_polygons\":11153},{\"tiny_polygons\":3221}]",
+"format": "pbf",
+"generator": "tippecanoe v2.79.0",
+"generator_options": "tippecanoe -e tiles -l parcels -P -Z6 -z14 -y o --drop-densest-as-needed --maximum-tile-bytes 2000000 --force '--name=New Regions parcels' /var/folders/4w/fdk7mj7x1d79ncrcv70w98sh0000gn/T/tmp.KdBBmukdk8/all_parcels.geojsonl",
+"json": "{\"vector_layers\":[{\"id\":\"parcels\",\"description\":\"\",\"minzoom\":6,\"maxzoom\":14,\"fields\":{\"o\":\"String\"}}],\"tilestats\":{\"layerCount\":1,\"layers\":[{\"layer\":\"parcels\",\"count\":2730177,\"geometry\":\"Polygon\",\"attributeCount\":1,\"attributes\":[{\"attribute\":\"o\",\"count\":4,\"type\":\"string\",\"values\":[\"g\",\"k\",\"n\",\"p\"]}]}]}}"
+}
