@@ -110,19 +110,17 @@ const map = new maplibregl.Map({
     version: 8,
     glyphs: location.origin + location.pathname.replace(/[^/]*$/, '') + 'fonts/{fontstack}/{range}.pbf',   // self-hosted (был openfreemap — блокировался/не грузился на части сетей → подписи пропадали)
     sources: {
-      // ⚠️ CARTO с сентября 2026 штампует «API KEY REQUIRED» поперёк каждого тайла — бесплатного
-      // доступа без ключа больше нет. Замена — Esri Canvas (тот же сервер, что у спутника, ключ не нужен);
-      // maxzoom:16 — выше тайлов нет, MapLibre растянет последний. Подписи НП рисует наш слой поверх.
-      light: { type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:16 },
-      base: { type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:16 },
+      // Тёмная/светлая подложка — ВЕКТОРНАЯ, из basemap-esri.json (добавляется в addBasemap после load).
+      // ⚠️ CARTO с сентября 2026 штампует «API KEY REQUIRED» на каждом тайле, а растровый Esri Canvas
+      // несёт свои подписи на обзорных зумах (≤z10): «UKRAINE», «ZAPORIZHZHIA OBLAST»… Векторный стиль
+      // Esri без слоя подписей даёт ту же картинку, но чистую — подписи НП рисуют наши слои поверх.
       sat: { type:'raster', tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize:256, maxzoom:19 },
       omt: { type:'vector', url:'https://tiles.openfreemap.org/planet', attribution:'© OpenMapTiles' },
       parcels: { type:'vector', tiles:['gz://' + location.origin + location.pathname.replace(/[^/]*$/, '') + 'tiles/{z}/{x}/{y}.pbf'], minzoom:6, maxzoom:14, bounds:[31.30, 45.50, 40.50, 50.30] }   // экстент данных — MapLibre не дёргает пустые угловые тайлы
     },
     layers: [
-      { id:'light', type:'raster', source:'light', layout:{visibility:'none'} },
-      { id:'base', type:'raster', source:'base' },   // тёмная подложка — по умолчанию
-      { id:'sat', type:'raster', source:'sat', layout:{visibility:'none'} },
+      { id:'bg', type:'background', paint:{ 'background-color':'#1d2224' } },   // цвет тёмной подложки, пока грузятся её тайлы
+      { id:'sat', type:'raster', source:'sat', layout:{visibility:'none'} },   // векторная подложка встаёт ПОД этот слой (addBasemap)
       // parcels-fill / parcels-line добавляются отложенно (addParcels) — сначала рисуется подложка
       { id:'lbl-water', type:'symbol', source:'omt', 'source-layer':'water_name',
         layout:{ 'text-field':['coalesce',['get','name:ru'],['get','name']], 'text-font':['Noto Sans Italic'], 'text-size':['interpolate',['linear'],['zoom'],6,10,12,15], 'text-max-width':8 },
@@ -146,7 +144,7 @@ const zoutBtn = document.getElementById('zout');
 function updateZoutBtn(){ const dis=map.getZoom()<=map.getMinZoom()+0.05; zoutBtn.style.opacity=dis?'.3':''; zoutBtn.style.pointerEvents=dis?'none':''; }
 map.on('zoom', updateZoutBtn);
 // Технический блок в правом нижнем углу: живой зум + версия (бампить при каждом апдейте беты)
-const BUILD_VERSION='b1';
+const BUILD_VERSION='b2';
 const betaInfo=document.createElement('div'); betaInfo.id='betainfo'; document.body.appendChild(betaInfo);
 function updateBetaInfo(){ betaInfo.textContent='z '+map.getZoom().toFixed(2)+' · '+BUILD_VERSION; }
 map.on('zoom', updateBetaInfo); map.on('moveend', updateBetaInfo); updateBetaInfo();
@@ -188,7 +186,7 @@ function updateRegionTitle(isLight){
 map.on('zoom', updateRegionTitle);
 updateRegionTitle();
 
-// Переключатель подложки: светлая (voyager) / тёмная (CARTO dark) / спутник (Esri)
+// Переключатель подложки: светлая / тёмная (векторные Esri без подписей) / спутник (Esri)
 function setBaseLabels(isLight){
   const halo=isLight?'#ffffff':'#0f1117';
   if(map.getLayer('lbl-place')){ map.setPaintProperty('lbl-place','text-color', isLight?'#1f2433':'#eef1f6'); map.setPaintProperty('lbl-place','text-halo-color',halo); }
@@ -198,9 +196,23 @@ function setBaseLabels(isLight){
   if(map.getLayer('lbl-water')){ map.setPaintProperty('lbl-water','text-color', isLight?'#1c4f8a':'#8fb6e0'); map.setPaintProperty('lbl-water','text-halo-color',halo); }
   if(typeof updateRegionTitle==='function') updateRegionTitle(isLight);   // титул региона подстраивает цвет под подложку
 }
+// Векторная подложка без подписей: две группы слоёв dark:* / light:* из basemap-esri.json, видна одна
+let BASEMAP_IDS = { dark: [], light: [] }, curBase = 'dark';
+function addBasemap(){
+  fetch(BASE + 'basemap-esri.json').then(r=>r.json()).then(bm=>{
+    if(!map.getSource('esri')) map.addSource('esri', bm.source);
+    for(const k of ['dark','light']) for(const l of bm[k]){
+      if(map.getLayer(l.id)) continue;
+      map.addLayer(Object.assign({}, l, { layout: Object.assign({}, l.layout, { visibility: k===curBase ? 'visible' : 'none' }) }), 'sat');
+      BASEMAP_IDS[k].push(l.id);
+    }
+  }).catch(e=>console.warn('basemap-esri.json не загрузился — подложка останется однотонной', e));
+}
 function setBase(which){
-  ['light','base','sat'].forEach(l=>{ if(map.getLayer(l)) map.setLayoutProperty(l,'visibility',
-    ((which==='light'&&l==='light')||(which==='dark'&&l==='base')||(which==='sat'&&l==='sat'))?'visible':'none'); });
+  curBase = which;
+  for(const k of ['dark','light']) for(const id of BASEMAP_IDS[k]) if(map.getLayer(id)) map.setLayoutProperty(id,'visibility', k===which ? 'visible' : 'none');
+  if(map.getLayer('sat')) map.setLayoutProperty('sat','visibility', which==='sat' ? 'visible' : 'none');
+  if(map.getLayer('bg')) map.setPaintProperty('bg','background-color', which==='light' ? '#cfd3d4' : '#1d2224');
   setBaseLabels(which==='light');
   document.querySelectorAll('#hud .bt[data-b]').forEach(b=>b.classList.toggle('on', b.dataset.b===which));
 }
@@ -538,6 +550,7 @@ function addRazmezh(){
 }
 map.on('styledata', addRazmezh);
 map.on('load', ()=>{
+  addBasemap();   // подложка первой: её тайлы грузятся параллельно с участками
   addParcels();   // детерминированно: участки добавляются сразу после первого кадра подложки (без зависимости от idle/таймеров)
   addRazmezh();   // страховка
   // оверлей отфильтрованных участков (гибрид: подгрузка по зуму)

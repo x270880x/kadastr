@@ -16,15 +16,23 @@
   (`preview_start name:"kadastr-nr"`). ⚠️ Конфиг раньше назывался `zaporizhzhia`
   и указывал на несуществующий путь — сервер поднимался, но отдавал пустоту;
   починено и проверено запуском 2026-07-19. Бета — `/map-beta.html`.
-- `BUILD_VERSION = 'v20'` в `index.html`, `'b1'` в `map-beta.html` (своя нумерация, не херсонская).
+- `BUILD_VERSION = 'v21'` в `index.html`, `'b2'` в `map-beta.html` (своя нумерация, не херсонская).
   Бампить при каждом деплое.
 
 ## Синхронизация с картой Херсона (2026-09-23, v20 / b1)
 Карта форкнута от kherson **ровно на v19** (2026-06-29). Херсон ушёл до v56/b23. Перенесено всё
 применимое; сверять дальше — от коммита kherson `017855afc` (v56).
-- **Подложки (kherson v55/b23):** CARTO с сентября 2026 штампует «API KEY REQUIRED» на каждом тайле →
-  Esri Canvas `World_Dark_Gray_Base` / `World_Light_Gray_Base` (до z16, выше — OSM). OSM `.org` → OSM France
-  `osmfr` (kherson ловил 403). Спутник `maxNativeZoom: 18`.
+- **Подложки (v21 / b2, 2026-09-23) — НЕ как у kherson.** CARTO с сентября 2026 штампует «API KEY REQUIRED».
+  Kherson (v55) перешёл на растровый Esri Canvas, но у него СВОИ подписи на обзорных зумах ≤z10: «UKRAINE»,
+  «ZAPORIZHZHIA OBLAST», «THE AUTONOMOUS REPUBLIC OF CRIMEA» прямо поверх наших областей (жалоба владельца 23.09).
+  Здесь «Вся карта» и бета рисуют **векторные тайлы Esri World_Basemap_v2** стилем Dark/Light Gray Canvas без слоя
+  подписей и без *-pattern-слоёв (им нужен спрайт) — файл `basemap-esri.json` (общий для обеих страниц, собран из
+  items `5e9b3685…` dark / `291da5ea…` light). В основной карте — через `@maplibre/maplibre-gl-leaflet` 0.1.3 в
+  отдельной панели `glBase` (z-index 150, под tilePane); растровые baseDark/baseLight в этом режиме получают
+  прозрачный `BLANK_TILE`. ⚠️ Связка при снятии слоя (спутник) уничтожает карту MapLibre и при возврате создаёт
+  новую из `options.style` — стиль менять через options (см. `showGlBase`). «По сёлам» — OSM `tile.openstreetmap.org`
+  (кириллица), при ошибке тайла подмена на OSM France (у него подписи по-французски: «Oblast de Kherson»).
+  Спутник Esri `maxNativeZoom: 18`. Растровые заглушки Esri «Map data not yet available» = 2 521 байт.
 - **Тайлы участков поверх подложек (v56):** `TILE_VG_OPTS.zIndex = 10`. Без него светлая схема (z-index 2)
   и спутник (3) закрывали участки (z-index 1) в «Вся карта».
 - **Палитра контуров под подложку (v56):** `OUTLINE_THEMES` / `baseKind` / `OT()` / `applyOutlineTheme()` на
