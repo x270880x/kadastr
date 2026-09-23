@@ -12,7 +12,6 @@
 <link rel="dns-prefetch" href="https://b.tile.openstreetmap.org"/>
 <link rel="dns-prefetch" href="https://c.tile.openstreetmap.org"/>
 <link rel="dns-prefetch" href="https://server.arcgisonline.com"/>
-<link rel="dns-prefetch" href="https://cdn.sheetjs.com"/>
 <title>Кадастровая карта Новых Регионов</title>
 <link rel="icon" href="favicon.ico" sizes="any"/>
 <link rel="icon" type="image/png" href="favicon-32.png" sizes="32x32"/>
@@ -257,7 +256,12 @@
   .rt-hover-pop .leaflet-popup-content { margin: 7px 9px; }
   .rt-hover-pop .leaflet-popup-tip { background: #fff; }
   /* Технический блок (зум + версия) — правый нижний угол */
-  #techinfo { position: fixed; right: 8px; bottom: 8px; z-index: 1200; pointer-events: none; font: 11px/1.2 'IBM Plex Mono', monospace; color: rgba(255,255,255,0.6); background: rgba(15,17,23,0.62); border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; padding: 3px 7px; letter-spacing: .3px; white-space: nowrap; }
+  #techinfo { position: fixed; right: 12px; bottom: 12px; z-index: 1200; pointer-events: none;
+             font: 700 15px/1.2 'IBM Plex Mono', monospace; color: #ffd873;
+             background: rgba(10,12,18,0.92); border: 1px solid rgba(255,216,115,0.55);
+             border-radius: 6px; padding: 7px 12px; letter-spacing: .5px; white-space: nowrap;
+             box-shadow: 0 2px 10px rgba(0,0,0,.6); }
+  @media (max-width: 768px) { #techinfo { font-size: 13px; padding: 5px 9px; right: 8px; bottom: 8px; } }
 
   /* Search results pane */
   #search-results { max-height: 180px; overflow-y: auto; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; margin-top: 4px; display: none; }
@@ -370,7 +374,8 @@
       <h3>📌 Подборка: <span id="basket-count" style="color:var(--accent)">0</span> участков</h3>
       <textarea id="basket-input" placeholder="Вставьте кадастры через перенос строки или запятую — добавятся в подборку" rows="3" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:6px;font-family:'IBM Plex Mono',monospace;font-size:10px;resize:vertical;margin-bottom:6px"></textarea>
       <button id="btn-basket-add" class="btn-export" style="margin-bottom:4px">Добавить в подборку</button>
-      <button id="btn-basket-export" class="btn-export" style="background:var(--green);color:#fff;border-color:var(--green);margin-bottom:4px">📥 Выгрузить подборку</button>
+      <button id="btn-basket-export" class="btn-export" style="background:var(--green);color:#fff;border-color:var(--green);margin-bottom:4px">📥 Выгрузить подборку (Excel)</button>
+      <button id="btn-basket-export-csv" class="btn-export" style="background:var(--green);color:#fff;border-color:var(--green);margin-bottom:4px">📄 Выгрузить подборку (CSV)</button>
       <button id="btn-basket-clear" class="btn-reset" style="margin-bottom:0;border-color:var(--accent);color:var(--accent)">Очистить подборку</button>
       <div style="color:var(--muted);font-size:10px;margin-top:6px">Shift+клик по участку — добавит/уберёт · Shift+рамка мышкой — добавить все участки в области</div>
     </div>
@@ -521,6 +526,7 @@ function flyOverview(animate) {   // обзор для ОБЕИХ плашек: 
   const z = (isFinite(Z_PARAM) && Z_PARAM > 0) ? Z_PARAM : overviewZoom();
   if (animate) map.flyTo(OVERVIEW_CENTER, z, { duration: 0.6 });
   else map.setView(OVERVIEW_CENTER, z, { animate: false });
+  clickStep = 0; clickRaion = '';   // на обзоре прогрессия кликов по НП — заново
 }
 // ── Лок карты: мин-зум ~8.5 (подгон под экран) + границы региона (за края не уехать ни на каком зуме) ──
 const MIN_ZOOM_BASE = 6.6;                                              // мин-зум на эталонном экране ~1440px (дальше отдалять нельзя)
@@ -580,7 +586,6 @@ map.on('zoomend', syncRegionOverview);
 
 // Polygon layers cache, keyed by council code
 const polygonLayers = {};        // code → L.geoJSON
-const parcelGeomIndex = {};      // cadnum → feature (for popups)
 let polygonsVisible = true;
 
 // Группировка близких маркеров; в пузырьке — сумма участков, разворачиваются при приближении.
@@ -621,6 +626,11 @@ async function ensureCouncilParcels(council) {
   delete council._loading;
   return result;
 }
+// Ленивый индекс cadnum→участок совета (строится 1 раз) — чтобы parcelStyle не делал O(n) .find на КАЖДЫЙ участок (было O(n²) на построение слоя)
+function byCad(council) {
+  if (!council._byCad && council.parcels) council._byCad = new Map(council.parcels.map(p => [p.c, p]));
+  return council._byCad || null;
+}
 
 let activePolyCode = null;
 // Показывать полигоны только текущего села; полигоны прошлого убираем с карты (но держим в кэше)
@@ -654,17 +664,17 @@ async function loadCouncilPolygons(code, additive = false) {
       style: f => parcelStyle(f, council),
       // Лёгкий проход: только подсветка участков из подборки. Попапы/события — делегированы на слой (ниже).
       onEachFeature: (f, l) => {
-        if (basket.has(f.properties.cadnum)) l.setStyle({ color:'#ff0', weight:3, fillOpacity:0.7 });
+        if (basket.has(f.properties.cadnum)) l.setStyle(basketStyle());
       }
     });
     // Делегирование на весь слой вместо обработчиков на каждом из тысяч участков
     layer.on('mouseover', e => {
       const l = e.layer;
-      if (!basket.has(l.feature.properties.cadnum)) l.setStyle({ weight: 2, color: '#fff' });
+      if (!basket.has(l.feature.properties.cadnum)) l.setStyle({ weight: 2.4, color: OT().hover, opacity: 1 });
     });
     layer.on('mouseout', e => {
       const l = e.layer;
-      if (basket.has(l.feature.properties.cadnum)) l.setStyle({ color:'#ff0', weight:3, fillOpacity:0.7 });
+      if (basket.has(l.feature.properties.cadnum)) l.setStyle(basketStyle());
       else layer.resetStyle(l);
     });
     layer.on('click', e => {
@@ -708,22 +718,26 @@ async function addCouncilView(code) {
 
 function parcelStyle(f, council) {
   const cad = f.properties.cadnum;
-  const data = council ? council.parcels.find(p => p.c === cad) : null;
-  // При активном фильтре показываем только подходящие участки, остальные прячем
-  if (hasAnyFilter() && !(data && parcelMatchesFilters(data, council ? council.region : ''))) {
-    return { stroke: false, fill: false };
+  const idx = council ? byCad(council) : null;
+  const data = idx ? idx.get(cad) : null;   // O(1) вместо линейного .find на каждый участок
+  // При активном фильтре подходящие ПОДСВЕЧИВАЕМ (яркая обводка), остальные ГАСИМ — но не прячем,
+  // чтобы был виден контекст квартала (раньше не подходящие исчезали совсем). (Из карты Херсона, v33.)
+  // Снятая галка формы собственности = слой выключен: участок не рисуется совсем. (Из карты Херсона, v50.)
+  if (data && !filterOwnership.has(data.ot)) return { stroke: false, fill: false };
+  const filtering = hasAnyFilter();
+  const match = !filtering || (data && parcelMatchesFilters(data, council ? council.region : ''));
+  let fill = data ? ownColor(data.ot) : '#3a3f55';
+  if (filtering && !match) {
+    return { stroke: true, fill: true, fillColor: fill, color: OT().dim, weight: 0.4, fillOpacity: 0.07, opacity: 0.35 };
   }
-  let fill = '#888';
-  if (data) {
-    fill = ownColor(data.ot);
-  } else {
-    fill = '#3a3f55';
+  if (filtering && match) {   // найденное — яркая обводка поверх обычной заливки
+    return { stroke: true, fill: true, fillColor: fill, color: OT().match, weight: 2, fillOpacity: 0.75, opacity: 1 };
   }
   // Межевание сделано → толстая фиолетовая обводка
   if (data && data.mz) {
-    return { stroke: true, fill: true, fillColor: fill, color: '#c050ff', weight: 2.5, fillOpacity: 0.6 };
+    return { stroke: true, fill: true, fillColor: fill, color: OT().mz, weight: 2.5, fillOpacity: 0.6 };
   }
-  return { stroke: true, fill: true, fillColor: fill, color: '#1a1a1a', weight: 0.6, fillOpacity: 0.5 };
+  return { stroke: true, fill: true, fillColor: fill, color: OT().seam, weight: 0.6 * OT().seamW, opacity: OT().seamOp, fillOpacity: 0.5 };
 }
 
 // Перерисовать полигоны загруженных сёл под текущий фильтр (скрыть неподходящие)
@@ -732,7 +746,7 @@ function restyleFilteredPolygons() {
     const layer = polygonLayers[code];
     const council = COUNCILS.find(c => c.code === code);
     layer.eachLayer(l => {
-      if (basket.has(l.feature.properties.cadnum)) l.setStyle({ color:'#ff0', weight:3, fillOpacity:0.7, stroke:true, fill:true });
+      if (basket.has(l.feature.properties.cadnum)) l.setStyle(basketStyle());
       else l.setStyle(parcelStyle(l.feature, council));
     });
   }
@@ -779,39 +793,82 @@ function buildParcelPopup(cad, data, council) {
     </div>`;
 }
 
-function togglePolygons() {
-  polygonsVisible = !polygonsVisible;
-  Object.values(polygonLayers).forEach(l => {
-    if (polygonsVisible) l.addTo(map); else map.removeLayer(l);
-  });
-}
-// Базовые слои.  OSM (со своими подписями) — обычный режим; CARTO *nolabels* — в режиме подписей НП «Вся карта» (как на бете)
-const OSM_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-const CARTO_DARK_NL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png';
-const CARTO_LIGHT_NL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png';
+// Базовые слои.  OSM (со своими подписями) — обычный режим; Esri Canvas (без подписей) — в режиме подписей НП «Вся карта» (как на бете)
+// ⚠️ tile.openstreetmap.org блокирует нас 403 «Access blocked» (tile usage policy) —
+// схемы берём с рендера OSM France: данные те же, сервер не блокирует. (Перенесено из карты Херсона.)
+const OSM_URL = 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png';
+// ⚠️ CARTO (basemaps.cartocdn.com) с сентября 2026 штампует «API KEY REQUIRED» поперёк КАЖДОГО
+// тайла — все адреса, включая легаси cartodb-basemaps-*, отдают одну и ту же картинку с водяным знаком.
+// Замена — Esri Canvas (тот же сервер, что и у спутника, ключ не нужен): до z14 подписей нет вовсе,
+// с z15 появляются названия улиц — но НЕ названия НП, а дубли именно их мы и убирали.
+const ESRI_DARK_NL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const ESRI_LIGHT_NL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+// maxNativeZoom — выше этого зума плиток не существует (Esri-спутник выше z18 отдаёт серую
+// «Map data not yet available»); Leaflet растянет последний реальный тайл.
 const baseDark = L.tileLayer(OSM_URL, {
-  maxZoom: 19, attribution: '© OpenStreetMap', className: 'map-tiles map-tiles-dark',
+  maxNativeZoom: 19, maxZoom: 19, attribution: '© OpenStreetMap / OSM France', className: 'map-tiles map-tiles-dark',
 });
 const baseLight = L.tileLayer(OSM_URL, {
-  maxZoom: 19, attribution: '© OpenStreetMap',
+  maxNativeZoom: 19, maxZoom: 19, attribution: '© OpenStreetMap / OSM France',
 });
-const baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  maxZoom: 19, attribution: '© Esri Imagery',
+const baseSat = L.tileLayer(SAT_URL, {
+  maxNativeZoom: 18, maxZoom: 19, attribution: '© Esri, Maxar, Earthstar Geographics',
 });
 baseDark.addTo(map);
 
-// Dark filter только для baseDark (OSM); в режиме подписей подложка — CARTO nolabels, инверт выключаем
+// ── Палитра контуров под подложку (перенесено из карты Херсона, v56) ──
+// Контуры были зашиты одним почти чёрным цветом: на СПУТНИКЕ швы тонули в крышах и деревьях,
+// соседние участки одного цвета склеивались; белая подсветка и жёлтая подборка не читались на светлой схеме.
+// Правило: шов контрастен подложке, выделение (наведение/подборка) контрастно и подложке, и шву.
+const OUTLINE_THEMES = {
+  dark:  { seam: '#0c0c0c', seamOp: 0.85, seamW: 1,   dim: '#2a2f3a', match: '#ffffff', hover: '#ffffff', basket: '#ffff00', mz: '#c050ff' },
+  light: { seam: '#1a1a1a', seamOp: 0.85, seamW: 1,   dim: '#9aa0aa', match: '#000000', hover: '#000000', basket: '#ff7a00', mz: '#8a2be2' },
+  sat:   { seam: '#ffffff', seamOp: 0.8,  seamW: 1.4, dim: '#ffffff', match: '#ffff00', hover: '#00e5ff', basket: '#ffff00', mz: '#ff7bff' },
+};
+let baseKind = 'dark';                       // какая подложка сейчас включена: dark | light | sat
+const OT = () => OUTLINE_THEMES[baseKind];
+const basketStyle = () => ({ color: OT().basket, weight: 3, fillOpacity: 0.7, stroke: true, fill: true });
+
+// Dark filter только для baseDark (OSM); в режиме подписей подложка — Esri Dark Gray, она уже тёмная, инверт выключаем
 const style = document.createElement('style');
 style.textContent = '.map-tiles-dark { filter: invert(0.92) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.7); }'
   + ' #map.labels-basemap .map-tiles-dark { filter: none !important; }';
 document.head.appendChild(style);
 // В «Вся карта» (labelsActive) подложка без подписей — наши подписи НП не дублируются OSM-подписями; в «По сёлам» возвращаем OSM (контекст соседних городов/рек)
+function setBasemap(layer, url, maxNative) {
+  layer.options.maxNativeZoom = maxNative;    // у Esri Canvas тайлы кончаются на z16 — выше Leaflet растянет
+  if (layer._url !== url) layer.setUrl(url);
+}
 function applyBasemapLabels() {
-  const noLabels = labelsActive();
-  baseDark.setUrl(noLabels ? CARTO_DARK_NL : OSM_URL);
-  baseLight.setUrl(noLabels ? CARTO_LIGHT_NL : OSM_URL);
+  // Esri Canvas заканчивается на z16: выше Leaflet растягивает последний тайл, и подложка мылится.
+  // С z17 возвращаемся к OSM — там наши пилюли НП и так редкие, дублей названий НП не будет.
+  const noLabels = labelsActive() && map.getZoom() <= 16;
+  setBasemap(baseDark, noLabels ? ESRI_DARK_NL : OSM_URL, noLabels ? 16 : 19);
+  setBasemap(baseLight, noLabels ? ESRI_LIGHT_NL : OSM_URL, noLabels ? 16 : 19);
   map.getContainer().classList.toggle('labels-basemap', noLabels);
 }
+map.on('zoomend', applyBasemapLabels);   // порог z16 — подложку надо пересматривать на каждом зуме
+
+// Смена подложки (шестерёнка вверху справа) → перекрасить ВСЁ, что уже нарисовано. Новые объекты
+// берут цвета из палитры сами (все стили читают OT() в момент отрисовки), а лежащие на карте — нет.
+function applyOutlineTheme() {
+  restyleFilteredPolygons();                                              // участки «По сёлам»
+  // Тайлы «Вся карта» перерисовываем СНЯТИЕМ И ДОБАВЛЕНИЕМ слоя, а не redraw(): в Leaflet 1.9 GridLayer.redraw()
+  // берёт зум карты БЕЗ округления, а у нас zoomSnap:0 — тайлы запрашивались бы как tiles/13.5/x/y.pbf (404),
+  // и заливка участков пропадала целиком. onAdd проходит через _setView, где зум округляется правильно.
+  const reAdd = l => { if (l && map.hasLayer(l)) { map.removeLayer(l); map.addLayer(l); } };
+  reAdd(parcelTilesAll);
+  for (const f in parcelLayers) reAdd(parcelLayers[f]);
+  if (hiOutlineLayer) hiOutlineLayer.resetStyle();                        // чёткие контуры поверх тайлов
+  if (hoverParcelLayer) hoverParcelLayer.setStyle({ color: OT().hover });
+  basketOverlay.eachLayer(l => l.resetStyle && l.resetStyle());           // подборка в тайловом режиме
+  if (razmezhLayer) razmezhLayer.setStyle(razmezhStyle);
+}
+map.on('baselayerchange', e => {
+  baseKind = e.layer === baseSat ? 'sat' : e.layer === baseLight ? 'light' : 'dark';
+  applyOutlineTheme();
+});
 
 const fullMapLayer = L.layerGroup();   // фиктивный слой-тумблер режима «Полная карта»
 const layersCtrl = L.control.layers({
@@ -847,7 +904,9 @@ const parcelLayers = {};            // «Вся карта»: по слою на
 const TILE_OWN_COLOR = { p: '#2ecc71', k: '#e8c547', g: '#4a9eff', n: '#ff6f61' };  // = ownColor
 const OT_SHORT = { 'Приватна власність':'p','Комунальна власність':'k','Державна власність':'g','Не визначено':'n' };
 const allMapVisible = new Set(['p','k','g','n']);   // формы, видимые в режиме «Вся карта» (по умолчанию все, вкл. частную)
-const TILE_VG_OPTS = { rendererFactory: L.canvas.tile, interactive: false, minZoom: 8, maxZoom: 19, maxNativeZoom: 14 };
+// zIndex: 10 — контрол слоёв раздаёт подложкам z-index по порядку (тёмная 1, светлая 2, спутник 3); с дефолтным 1
+// участки ложились ПОД светлую схему и спутник и пропадали в «Вся карта». maxZoom держать равным maxZoom карты.
+const TILE_VG_OPTS = { zIndex: 10, rendererFactory: L.canvas.tile, interactive: false, minZoom: 8, maxZoom: 19, maxNativeZoom: 14 };
 function fillOp() {   // яркость заливки по зуму: z≤9 → 0.80, z10 → 0.65, z11+ → 0.50 (обновляется при отрисовке тайлов на смене зума)
   const z = map.getZoom();
   if (z <= 9) return 0.80;
@@ -856,7 +915,7 @@ function fillOp() {   // яркость заливки по зуму: z≤9 → 
 }
 function tileStyle(props, only) {   // only=undefined → красить все формы; only='p' → только эту форму
   if (only && props.o !== only) return [];
-  return { weight: 0.35, color: '#1a1a1a', opacity: 0.85, fill: true, fillColor: TILE_OWN_COLOR[props.o] || '#888', fillOpacity: fillOp() };
+  return { weight: 0.35 * OT().seamW, color: OT().seam, opacity: OT().seamOp, fill: true, fillColor: TILE_OWN_COLOR[props.o] || '#888', fillOpacity: fillOp() };
 }
 function ensureFormLayer(form) {    // слой одной формы (для «Вся карта»)
   return parcelLayers[form] || (parcelLayers[form] = L.vectorGrid.protobuf('tiles/{z}/{x}/{y}.pbf',
@@ -881,12 +940,19 @@ function syncParcelTiles() {
 }
 
 // Слой РФ-межевания (как в бете): фильтр «Размежёванные» подсвечивает размежёванные участки фиолетовым — на любом зуме и в любом режиме
+// Стиль межевания: заливка гаснет при приближении (как в бете), ободок остаётся.
+// Иначе крупные наделы (до 2 900 га) закрывают карту сплошным фиолетовым пятном. (Перенесено из карты Херсона, v39.)
+function razmezhStyle() {
+  const z = map.getZoom();
+  const fo = z <= 10 ? 0.16 : z >= 13 ? 0 : 0.16 * (13 - z) / 3;
+  return { color: OT().mz, weight: z >= 13 ? 1.8 : 1.2, fillColor: OT().mz, fillOpacity: fo, fill: fo > 0 };
+}
 let razmezhLayer = null;
 function syncRazmezh() {
   // видно: всегда при фильтре «Размежёванные»; и по умолчанию в режиме «Вся карта» (кроме явного «Не размежёванные»)
   if (filterMz === 'yes' || (ownMode === 'all' && filterMz !== 'no')) {
     if (!razmezhLayer) {
-      razmezhLayer = L.geoJSON(null, { interactive: false, style: { color: '#c050ff', weight: 1.6, fillColor: '#c050ff', fillOpacity: 0.25 } });
+      razmezhLayer = L.geoJSON(null, { interactive: false, style: razmezhStyle });
       fetch('razmezh.geojson').then(r => r.json()).then(d => razmezhLayer.addData(d)).catch(() => {});
     }
     if (!map.hasLayer(razmezhLayer)) razmezhLayer.addTo(map);
@@ -894,6 +960,7 @@ function syncRazmezh() {
     map.removeLayer(razmezhLayer);
   }
 }
+map.on('zoomend', () => { if (razmezhLayer && map.hasLayer(razmezhLayer)) razmezhLayer.setStyle(razmezhStyle()); });   // заливка межевания по зуму
 
 // ===== Подписи НП «как на бете»: тот же источник (councils-index.json), те же центры/координаты/имена и правила кликов =====
 const isUrban = n => /^(смт|пгт|м\.|город)(\s|$)/i.test(n || '');   // урбан-НП (для выбора центра района)
@@ -999,7 +1066,6 @@ function showOwnTable(p) { if (p.o) showTable([p.lat, p.lon], ownTableHTML(p)); 
 function showRaionTable(p) { const rname = RAION_BY_PREFIX[p.rpfx]; if (rname) showTable([p.lat, p.lon], raionTableHTML(rname)); }
 
 // Наведение в ОБЛАСТЬ НП на ЛЮБОМ зуме: по карте ищем ближайший НП и показываем его табличку у курсора (не только на подписи)
-function nearestCouncil(lng, lat) { let best = null, bd = 1e9; for (const c of CIDX) { const d = (c.lat - lat) ** 2 + (c.lon - lng) ** 2; if (d < bd) { bd = d; best = c; } } return { best, bd }; }
 let lastHoverCode = '';
 function mapAreaHover(latlng, ev) {
   // ближайший НП СРЕДИ ВИДИМЫХ подписей (labelByCode)
@@ -1023,12 +1089,16 @@ function mapAreaHover(latlng, ev) {
   }
   lastHoverCode = best.c;
 }
+let _mahQ = false, _mahArgs = null;
 map.on('mousemove', e => {
   if (!labelsActive() || !CIDX.length) return;                 // только в «Вся карта»
   if (e.originalEvent && e.originalEvent.shiftKey) return;      // не мешать Shift-рамке подборки
   const t = e.originalEvent && e.originalEvent.target;
   if (t && t.closest && t.closest('.leaflet-tooltip.council-label')) return;   // над подписью — её собственный hover (центр→район, село→совет)
-  mapAreaHover(e.latlng, e.originalEvent);
+  _mahArgs = [e.latlng, e.originalEvent];
+  if (_mahQ) return;                                           // не чаще кадра (скан LABEL_PTS не на каждый пиксель)
+  _mahQ = true;
+  requestAnimationFrame(() => { _mahQ = false; if (_mahArgs) mapAreaHover(_mahArgs[0], _mahArgs[1]); });
 });
 // mouseleave контейнера (НЕ map 'mouseout', который срабатывает при заходе на подпись и гасил табличку)
 map.getContainer().addEventListener('mouseleave', () => { clearHover(); lastHoverCode = ''; });
@@ -1164,7 +1234,7 @@ function setHoverParcel(hit) {
   if (cad === hoverParcelCad) return;                  // тот же участок — не перерисовываем
   hoverParcelCad = cad;
   if (hoverParcelLayer) { map.removeLayer(hoverParcelLayer); hoverParcelLayer = null; }
-  if (hit) hoverParcelLayer = L.geoJSON(hit.feature, { interactive: false, style: { color: '#fff', weight: 2, fill: false } }).addTo(map);
+  if (hit) hoverParcelLayer = L.geoJSON(hit.feature, { interactive: false, style: { color: OT().hover, weight: 2.4, fill: false } }).addTo(map);
   map.getContainer().style.cursor = hit ? 'pointer' : '';
 }
 let _hoverQueued = false, _hoverLL = null;
@@ -1200,7 +1270,7 @@ function syncBasketOverlay() {
       feats.forEach(f => {
         const cad = f.properties.cadnum;
         if (want.has(cad) && basket.has(cad) && !basketOverlayByCad[cad]) {
-          const lyr = L.geoJSON(f, { interactive: false, style: { color: '#ff0', weight: 3, fill: true, fillColor: '#ff0', fillOpacity: 0.35 } });
+          const lyr = L.geoJSON(f, { interactive: false, style: () => ({ color: OT().basket, weight: 3, fill: true, fillColor: OT().basket, fillOpacity: 0.35 }) });
           basketOverlayByCad[cad] = lyr; lyr.addTo(basketOverlay);
         }
       });
@@ -1230,7 +1300,7 @@ function syncHiZoomOutlines() {
   }
   clearHiOutlines();
   if (feats.length) hiOutlineLayer = L.geoJSON({ type: 'FeatureCollection', features: feats },
-    { interactive: false, style: { color: '#0c0c0c', weight: 0.9, fill: false } }).addTo(map);
+    { interactive: false, style: () => ({ color: OT().seam, weight: 0.9 * OT().seamW, opacity: OT().seamOp, fill: false }) }).addTo(map);
 }
 function enableFullMap() {
   fullMapMode = true;
@@ -1261,11 +1331,11 @@ let markers = {};
 let activeCode = null;
 let filterRenter = '';
 let filterOwnership = new Set();
+// Свой ключ запомненного режима: карта Херсона живёт на том же origin (x270880x.github.io) и писала в 'kherson_mode' —
+// переключение режима на одной карте меняло стартовый режим другой.
+const MODE_KEY = 'kadastr_nr_mode';
 // Режим блока собственности: 'council' (фильтр по открытым сёлам) | 'all' (показ типа по всей области)
 let ownMode = 'council';
-const ownRegionLayers = {};   // ot → L.geoJSON (региональный слой, lazy)
-const OWN_FILE = { 'Державна власність': 'own_gos', 'Комунальна власність': 'own_kom', 'Не визначено': 'own_nedef' };
-const OWN_PRIVATE = 'Приватна власність';   // частную по всей области не показываем (≈440к участков)
 let filterCategory = '';
 let filterRegion = '';
 let filterLeaseYear = '';
@@ -1302,20 +1372,23 @@ function parcelMatchesFilters(p, councilRegion) {
   return true;
 }
 
+// ⚠️ Формы собственности — это СЛОИ (галочки), а не фильтр: снятая галка ПРЯЧЕТ форму с карты
+// (см. parcelStyle), поэтому в hasAnyFilter она не участвует — иначе снятие одной формы включало бы
+// режим подсветки и обводило все оставшиеся участки.
 function hasAnyFilter() {
-  return !!(filterRenter || filterOwnership.size > 0 || filterCategory || filterRegion || filterLeaseYear || filterMz);
+  return !!(filterRenter || filterCategory || filterRegion || filterLeaseYear || filterMz);
 }
+// Сужение выборки для подсчётов (сюда формы входят — счётчики в правой панели должны их учитывать)
+function ownNarrowed() { return filterOwnership.size < (FILTERS.ownership || []).length; }
+function hasAnyNarrowing() { return hasAnyFilter() || ownNarrowed(); }
 
-function getFilteredCount(council) {
-  return getFilteredStats(council).count;
-}
 
 // число размежёванных (РФ кадастр) участков по коду совета — для агрегатного подсчёта filterMz
 const MZ_COUNT={"6522186500":4,"6522381000":25,"6522310100":6,"6521555100":20,"6524455100":32,"6525455100":30,"6522384300":7,"6522386000":16,"6523585500":67,"6523555100":28,"6522682500":3,"6523586000":52,"6524455500":1,"6522384000":31,"6524481500":2,"6510745300":118,"6524480400":23,"6524480500":50,"6522155400":1,"6522380500":101,"6510790800":66,"6522187500":12,"6523582700":41,"6522385000":91,"6522655100":10,"6523580500":66,"6523583800":30,"6522183000":7,"6524485000":30,"6523583500":27,"6522382500":67,"6525455300":30,"6524784500":4,"6524484000":12,"6522383900":75,"6523287700":3,"6522181500":57,"6522683500":2,"6521583300":13,"6523585000":20,"6525483100":4,"6522384200":42,"6522382000":21,"6523880500":37,"6525480500":8,"6523884500":26,"6525481000":13,"6522383000":31,"6524785000":1,"6523580700":62,"6523584000":61,"6525484700":13,"6521584400":7,"6523586500":3,"6523581500":14,"6522383800":23,"6525481300":5,"6522383200":38,"6523881000":14,"6523883300":4,"6525483000":24,"6522385500":18,"6525483500":4,"6524784900":7,"6524484500":2,"6523584500":45,"6522383400":9,"6525484000":21,"6523884000":1,"6522385400":12,"6522680500":15,"6524482000":5,"6523882500":1,"6523883000":1,"6524480200":16,"6523581000":18,"6524483800":32,"6522682000":7,"6524482200":5,"6523581800":15,"6522384500":164,"6524481000":15,"6523584700":19,"6524481300":1,"6521586000":5,"6523882000":1,"6523881500":14,"6525483800":18,"6522380200":26,"6524481700":5,"6522684000":10,"6522385300":5,"6523883500":10,"6522683300":4,"6523582000":12,"6521581100":16,"6522685000":1,"6523880200":3,"6523880400":17,"6522981500":6,"6524481800":6,"6523583000":4,"6523582500":60,"6522381500":11,"6523583600":14};
 
 // v2: используем агрегаты, если parcels не загружены
 function getFilteredStats(council) {
-  if (!hasAnyFilter()) return { count: council.total, area: council.area };
+  if (!hasAnyNarrowing()) return { count: council.total, area: council.area };
   // If parcels already loaded, compute exactly
   if (council.parcels) {
     let n = 0, a = 0;
@@ -1369,34 +1442,6 @@ function getFilteredStats(council) {
 function fmt(n) { return Number(n).toLocaleString('ru'); }
 
 // ── Режим «вся карта»: показ участков выбранной формы собственности по всей области ──
-async function showOwnRegion(ot) {
-  const key = OWN_FILE[ot];
-  if (!key) return;
-  if (!ownRegionLayers[ot]) {
-    try {
-      const resp = await fetch(`${key}.geojson`);
-      if (!resp.ok) return;
-      const fcoll = await resp.json();
-      const lyr = L.geoJSON(fcoll, {
-        smoothFactor: 2,
-        style: { color: ownColor(ot), weight: 0.6, fillColor: ownColor(ot), fillOpacity: 0.5 }
-      });
-      lyr.on('click', e => {        // делегирование на весь слой (без обработчиков на каждом из десятков тысяч участков)
-        if (map.getZoom() < 12.0) return;   // ниже z12.0 — только статичный приблизительный цвет; на сами полигоны (клик/детали) переключаемся с z12.0
-        const l = e.layer, f = l.feature, cad = f.properties.cadnum;
-        if (e.originalEvent && e.originalEvent.shiftKey) { basketToggle(cad); L.DomEvent.stopPropagation(e); return; }
-        const council = COUNCILS.find(c => c.code === cad.slice(0, 10));
-        l.bindPopup(buildParcelPopup(cad, { c: cad, a: f.properties.a, ot: f.properties.ot }, council)).openPopup();
-      });
-      ownRegionLayers[ot] = lyr;
-    } catch (e) { return; }
-  }
-  if (ownMode !== 'all') return;   // режим мог смениться, пока грузилось
-  if (!map.hasLayer(ownRegionLayers[ot])) ownRegionLayers[ot].addTo(map);
-}
-function hideOwnRegion(ot) {
-  if (ownRegionLayers[ot] && map.hasLayer(ownRegionLayers[ot])) map.removeLayer(ownRegionLayers[ot]);
-}
 function applyOwnModeUI() {
   document.querySelectorAll('#own-mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === ownMode));
   document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => {
@@ -1409,8 +1454,8 @@ function applyOwnModeUI() {
 function setOwnMode(mode, noFly) {   // noFly: вид уже выставлен (старт) — не перелетать, чтобы тайлы грузились один раз
   if (mode === ownMode) return;
   ownMode = mode;
-  try { localStorage.setItem('kherson_mode', mode); } catch (e) {}   // запомнить плашку — восстановим при следующем заходе
-  filterOwnership = new Set();
+  try { localStorage.setItem(MODE_KEY, mode); } catch (e) {}   // запомнить плашку — восстановим при следующем заходе
+  filterOwnership = new Set(FILTERS.ownership || []);   // формы видимы в обоих режимах
   if (mode === 'all') {
     allMapVisible.clear(); ['p','k','g','n'].forEach(s => allMapVisible.add(s));   // со старта все формы (вкл. частную)
     document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => cb.checked = true);
@@ -1422,8 +1467,7 @@ function setOwnMode(mode, noFly) {   // noFly: вид уже выставлен 
     syncParcelTiles();    // тайлы добавляем ПОСЛЕ установки вида → грузятся один раз для нужного зума
     labelsUpdate();
   } else {
-    document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => cb.checked = false);
-    for (const ot in ownRegionLayers) hideOwnRegion(ot);   // убрать региональные слои (легаси own_*)
+    document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => cb.checked = true);
     syncParcelTiles();       // убрать тайлы
     labelsClear();           // снять подписи
     if (!map.hasLayer(clusterGroup)) clusterGroup.addTo(map);   // вернуть кружки-маркеры
@@ -1442,6 +1486,7 @@ function buildMarkers() {
   markers = {};
 
   const hasFilter = hasAnyFilter();
+  const ttMobile = window.matchMedia('(max-width: 768px)').matches;   // одно вычисление на весь проход, не на каждый совет
   let totalCount = 0, totalArea = 0;
 
   COUNCILS.forEach(c => {
@@ -1462,7 +1507,6 @@ function buildMarkers() {
     const ttArea = hasFilter
       ? `${fmt(fs.area)} / ${fmt(c.area)} га`
       : `${fmt(c.area)} га`;
-    const ttMobile = window.matchMedia('(max-width: 768px)').matches;
     m.bindTooltip(`<div class="pname">${escapeHtml(ruName(c.name))}</div><div class="praion">${raionOf(c.code)}</div><div class="pstats">${fs.count} участков · ${ttArea}</div>`, {
       // на мобиле — снизу (название не срезается верхним краем при тапе/зуме), на десктопе — сверху
       direction: ttMobile ? 'bottom' : 'top', offset: [0, ttMobile ? sz/2 : -sz/2], opacity: 0.95
@@ -1538,6 +1582,7 @@ async function showDetail(code) {
           </div>
         </div>
         <button class="btn-export-sm" onclick="exportCouncil('${c.code}')">📥 Excel</button>
+        <button class="btn-export-sm" onclick="exportCouncil('${c.code}','csv')">📄 CSV</button>
       </div>
     </div>
 
@@ -1567,7 +1612,7 @@ async function showDetail(code) {
       <h4>Арендаторы (${c.top_renters.length})</h4>
       <div class="bar-list" style="max-height:220px;overflow-y:auto;padding-right:4px">
         ${c.top_renters.map(([k,v])=>`
-          <div class="bar-row" style="cursor:pointer" onclick="selectRenter(${JSON.stringify(k)})">
+          <div class="bar-row" style="cursor:pointer" onclick="selectRenter(${escapeHtml(JSON.stringify(k))})">
             <span class="name">${escapeHtml(k)}</span>
             <span class="count">${v}</span>
           </div>
@@ -1600,10 +1645,10 @@ async function showDetail(code) {
           <span class="area">${p.a} га</span>
           ${p.r ? `<div class="field"><span class="label">аренд.: </span><span class="val">${escapeHtml(p.r)}</span></div>` : ''}
           ${p.o ? `<div class="field"><span class="label">собств.: </span><span class="val">${escapeHtml(p.o)}${p.oc>1?` <span style="color:var(--muted)">(+${p.oc-1} совладельца)</span>`:''}</span></div>` : ''}
-          ${p.oi ? `<div class="field"><span class="label">ІПН собств.: </span><span class="val" style="font-family:'IBM Plex Mono',monospace">${escapeHtml(p.oi)}</span></div>` : ''}
+          ${p.oi ? `<div class="field"><span class="label">ИНН собств.: </span><span class="val" style="font-family:'IBM Plex Mono',monospace">${escapeHtml(p.oi)}</span></div>` : ''}
           ${p.od ? `<div class="field"><span class="label">право зарег.: </span><span class="val">${p.od}</span></div>` : ''}
           ${p.ed ? `<div class="field"><span class="label">договор: </span><span class="val" ${expClass}>до ${p.ed}${p.cn?` · №${escapeHtml(p.cn)}`:''}${p.ra?` · ${p.ra} грн`:''}${p.np?` · ${p.np}% НГО`:''}</span></div>` : ''}
-          ${p.re ? `<div class="field"><span class="label">ЄДРПОУ аренд.: </span><span class="val" style="font-family:'IBM Plex Mono',monospace">${escapeHtml(p.re)}</span></div>` : ''}
+          ${p.re ? `<div class="field"><span class="label">ЕГРПОУ аренд.: </span><span class="val" style="font-family:'IBM Plex Mono',monospace">${escapeHtml(p.re)}</span></div>` : ''}
           ${p.ad ? `<div class="field"><span class="label">адр.: </span><span class="val">${escapeHtml(p.ad)}</span></div>` : ''}
         </div>
       `;}).join('')}
@@ -1611,43 +1656,7 @@ async function showDetail(code) {
   `;
 }
 
-function renderParcelCard(p) {
-  const expClass = p.ey && p.ey < 2026 ? 'style="color:var(--red)"'
-                  : p.ey && p.ey <= 2027 ? 'style="color:var(--orange)"'
-                  : '';
-  return `
-    <div class="parcel">
-      <span class="cad" onclick="navigateToParcel('${p.c}')">${p.c}</span>
-      <span class="area">${p.a} га</span>
-      ${p.r ? `<div class="field"><span class="label">аренд.: </span><span class="val">${escapeHtml(p.r)}</span></div>` : ''}
-      ${p.o ? `<div class="field"><span class="label">собств.: </span><span class="val">${escapeHtml(p.o)}${p.oc>1?` <span style="color:var(--muted)">(+${p.oc-1} совладельца)</span>`:''}</span></div>` : ''}
-      ${p.oi ? `<div class="field"><span class="label">ІПН собств.: </span><span class="val" style="font-family:'IBM Plex Mono',monospace">${escapeHtml(p.oi)}</span></div>` : ''}
-      ${p.od ? `<div class="field"><span class="label">право зарег.: </span><span class="val">${p.od}</span></div>` : ''}
-      ${p.ed ? `<div class="field"><span class="label">договор: </span><span class="val" ${expClass}>до ${p.ed}${p.cn?` · №${escapeHtml(p.cn)}`:''}${p.ra?` · ${p.ra} грн`:''}${p.np?` · ${p.np}% НГО`:''}</span></div>` : ''}
-      ${p.re ? `<div class="field"><span class="label">ЄДРПОУ аренд.: </span><span class="val" style="font-family:'IBM Plex Mono',monospace">${escapeHtml(p.re)}</span></div>` : ''}
-      ${p.ad ? `<div class="field"><span class="label">адр.: </span><span class="val">${escapeHtml(p.ad)}</span></div>` : ''}
-    </div>`;
-}
 
-function loadMoreParcels() {
-  const parcels = window._curParcels || [];
-  const prev = window._curShown || 0;
-  const next = Math.min(prev + 300, parcels.length);
-  const btn = document.getElementById('parcel-more');
-  const head = document.getElementById('parcel-list-head');
-  // Insert new cards before the button
-  const html = parcels.slice(prev, next).map(renderParcelCard).join('');
-  btn.insertAdjacentHTML('beforebegin', html);
-  window._curShown = next;
-  // Update or remove the button
-  if (next >= parcels.length) {
-    btn.remove();
-    head.textContent = head.textContent.replace(/ — показано .*$/, ` (${parcels.length})`);
-  } else {
-    btn.textContent = `Показать ещё ${Math.min(300, parcels.length - next)} из ${parcels.length - next}`;
-    head.textContent = head.textContent.replace(/показано \d+ из \d+/, `показано ${next} из ${parcels.length}`);
-  }
-}
 
 function escapeHtml(s) {
   if (!s) return '';
@@ -1660,27 +1669,29 @@ function openCadastr(cad) {
 }
 
 function parcelsToRows(parcels, council) {
+  const _np = nameParts(council.name);                          // «укр (рус)» → {ru, ua}
+  const _sovet = _np.ua ? `${_np.ru} (${_np.ua})` : _np.ru;     // русское в приоритете, украинское в скобках
   return parcels.map(p => ({
-    'Кадастровый номер': p.c,
+    'Кадастровый номер (УКР)': p.c,
+    'Кадастровый номер (РФ)': p.mz || '',
     'Площадь, га': p.a,
     'Регион': council.region || '',
-    'Сельсовет': council.name,
+    'Сельсовет': _sovet,
     'Код сельсовета': council.code,
-    'Форма собственности': p.ot || '',
-    'Категория земель': p.ct || '',
+    'Форма собственности': ruOwn(p.ot || ''),
+    'Категория земель': catRu(p.ct),
     'Собственник': p.o || '',
     'Совладельцев всего': p.oc || (p.o ? 1 : 0),
-    'ІПН собственника': p.oi || '',
+    'ИНН собственника': p.oi || '',
     'Дата рег. права собств.': p.od || '',
     'Арендатор': p.r || '',
-    'ЄДРПОУ арендатора': p.re || '',
+    'ЕГРПОУ арендатора': p.re || '',
     '№ договора': p.cn || '',
     'Дата регистрации договора': p.rd || '',
     'Окончание договора': p.ed || '',
     'Размер аренды, грн': p.ra ?? '',
     '% НГО': p.np ?? '',
-    'RU кадастр (межевание)': p.mz || '',
-    'RU муниципалитет': p.mzmo || '',
+    'РФ муниципалитет': p.mzmo || '',
     'Факт передачи': p.mzp || '',
     'Адрес': p.ad || '',
   }));
@@ -1710,7 +1721,7 @@ function loadXlsx() {
   if (window.XLSX) return Promise.resolve();
   if (!_xlsxPromise) _xlsxPromise = new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+    s.src = 'xlsx.full.min.js';   // самохостинг (SheetJS 0.20.1) — работает без доступа к CDN
     s.onload = res;
     s.onerror = () => { _xlsxPromise = null; rej(new Error('xlsx load failed')); };
     document.head.appendChild(s);
@@ -1728,14 +1739,17 @@ async function downloadXlsx(rows, filename, sheetName) {
     }
     return;
   }
-  try { await loadXlsx(); } catch (e) { alert('Не удалось загрузить модуль экспорта Excel. Проверьте интернет и повторите.'); return; }
+  try { await loadXlsx(); } catch (e) {
+    if (confirm('Не удалось загрузить модуль Excel. Скачать в CSV (открывается в Excel)?')) downloadCsv(rows, filename.replace(/\.xlsx$/, '.csv'));
+    return;
+  }
   const ws = XLSX.utils.json_to_sheet(rows);
   const widths = {
-    'Кадастровый номер': 24, 'Площадь, га': 12, 'Регион': 12,
+    'Кадастровый номер (УКР)': 24, 'Кадастровый номер (РФ)': 24, 'Площадь, га': 12, 'Регион': 12,
     'Сельсовет': 28, 'Код сельсовета': 14, 'Форма собственности': 22,
     'Категория земель': 38, 'Собственник': 40, 'Совладельцев всего': 8,
-    'ІПН собственника': 14, 'Дата рег. права собств.': 18,
-    'Арендатор': 40, 'ЄДРПОУ арендатора': 14, '№ договора': 14,
+    'ИНН собственника': 14, 'Дата рег. права собств.': 18,
+    'Арендатор': 40, 'ЕГРПОУ арендатора': 14, '№ договора': 14,
     'Дата регистрации договора': 18, 'Окончание договора': 16,
     'Размер аренды, грн': 14, '% НГО': 8, 'Адрес': 60,
   };
@@ -1745,60 +1759,8 @@ async function downloadXlsx(rows, filename, sheetName) {
   XLSX.writeFile(wb, filename);
 }
 
-async function exportFiltered() {
-  const btn = document.getElementById('btn-export-all');
-  const origText = btn.textContent;
-  try {
-    // Determine which councils to load
-    let targetCouncils;
-    if (filterRenter && RENTER_COUNCILS[filterRenter]) {
-      targetCouncils = COUNCILS.filter(c => RENTER_COUNCILS[filterRenter].includes(c.code));
-    } else if (filterRegion) {
-      targetCouncils = COUNCILS.filter(c => c.region === filterRegion);
-    } else {
-      if (!confirm(`Внимание: фильтр не выбран. Будет ~600k участков (Excel может зависнуть). Лучше выбрать арендатора/регион. Всё равно экспортировать?`)) {
-        btn.textContent = origText; btn.disabled = false; return;
-      }
-      targetCouncils = COUNCILS;
-    }
-    btn.disabled = true;
-    btn.textContent = `Загрузка...`;
-    const need = targetCouncils.filter(c => !c.parcels);
-    if (need.length > 0) {
-      let loaded = 0;
-      for (let i=0; i<need.length; i+=10) {
-        await Promise.all(need.slice(i, i+10).map(c => ensureCouncilParcels(c)));
-        loaded += Math.min(10, need.length - i);
-        btn.textContent = `Загрузка ${loaded}/${need.length}…`;
-      }
-    }
-    btn.textContent = 'Формирую Excel...';
-  const rows = [];
-  for (const c of targetCouncils) {
-    for (const p of (c.parcels || [])) {
-      if (parcelMatchesFilters(p, c.region)) rows.push(parcelsToRows([p], c)[0]);
-    }
-  }
-  const stamp = new Date().toISOString().slice(0,10);
-  let suffix = 'все';
-  const tags = [];
-  if (filterRegion) tags.push('рег_' + filterRegion);
-  if (filterRenter) tags.push('аренд_' + filterRenter.slice(0,30).replace(/[^а-яА-Яa-zA-Z0-9]/g,'_'));
-  if (filterOwnership.size > 0) tags.push('собств_' + Array.from(filterOwnership).join('_').slice(0,40).replace(/[^а-яА-Яa-zA-Z0-9]/g,'_'));
-  if (filterCategory) tags.push('кат_' + filterCategory.slice(0,30).replace(/[^а-яА-Яa-zA-Z0-9]/g,'_'));
-  if (filterLeaseYear) tags.push('год_' + filterLeaseYear);
-  if (tags.length) suffix = tags.join('__');
-  downloadXlsx(rows, `Кадастр_${suffix}_${stamp}.xlsx`, 'Участки');
-  } catch (e) {
-    alert('Ошибка экспорта: ' + (e.message || e));
-    console.error(e);
-  } finally {
-    btn.textContent = origText;
-    btn.disabled = false;
-  }
-}
 
-async function exportCouncil(code) {
+async function exportCouncil(code, fmt) {
   const c = COUNCILS.find(x => x.code === code);
   if (!c) return;
   await ensureCouncilParcels(c);
@@ -1806,7 +1768,8 @@ async function exportCouncil(code) {
   const rows = parcelsToRows(parcels, c);
   const stamp = new Date().toISOString().slice(0,10);
   const safe = c.name.replace(/[^а-яА-Яa-zA-Z0-9]/g,'_');
-  downloadXlsx(rows, `${safe}_${stamp}.xlsx`, c.name.slice(0,30));
+  if (fmt === 'csv') downloadCsv(rows, `${safe}_${stamp}.csv`);           // CSV — мгновенно, без загрузки модуля Excel
+  else downloadXlsx(rows, `${safe}_${stamp}.xlsx`, c.name.slice(0,30));
 }
 
 // Sidebar stats
@@ -1819,7 +1782,7 @@ function renderRentersList(query) {
   if (!tr) return;   // блок «Все арендаторы» убран из меню
   document.getElementById('renters-count').textContent = list.length + (q ? ` / ${STATS.top_renters.length}` : '');
   tr.innerHTML = list.map(([k,v])=>`
-    <div class="bar-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:5px 0;font-size:11px;cursor:pointer;border-bottom:1px dotted var(--border);line-height:1.35" onclick="selectRenter(${JSON.stringify(k)})">
+    <div class="bar-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:5px 0;font-size:11px;cursor:pointer;border-bottom:1px dotted var(--border);line-height:1.35" onclick="selectRenter(${escapeHtml(JSON.stringify(k))})">
       <span class="name" style="flex:1;color:var(--text);word-break:break-word">${escapeHtml(k)}</span>
       <span class="count" style="font-family:'IBM Plex Mono',monospace;color:var(--accent);min-width:36px;text-align:right;flex-shrink:0">${v}</span>
     </div>
@@ -1853,12 +1816,13 @@ function renderSidebar() {
   const ownOrdered = [...FILTERS.ownership].sort((a,b) => (a === 'Не визначено' ? 1 : 0) - (b === 'Не визначено' ? 1 : 0));
   fo.innerHTML = ownOrdered.map((r,i)=>`
     <label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;line-height:1.3;font-size:12px;text-transform:none;letter-spacing:0;font-weight:400;margin:0">
-      <input type="checkbox" value="${escapeHtml(r)}" data-ownership style="margin:0;flex-shrink:0;width:13px;height:13px;accent-color:${ownColor(r)}"/>
+      <input type="checkbox" value="${escapeHtml(r)}" data-ownership checked style="margin:0;flex-shrink:0;width:13px;height:13px;accent-color:${ownColor(r)}"/>
       <span style="width:10px;height:10px;border-radius:2px;background:${ownColor(r)};flex-shrink:0"></span>
       <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${ownColor(r)}">${escapeHtml(ruOwn(r).replace(' собственность',''))}</span>
       <span style="font-family:'IBM Plex Mono',monospace;color:var(--muted);font-size:11px;flex-shrink:0">${fmt(STATS.ownership_split[r] || 0)}</span>
     </label>
   `).join('');
+  filterOwnership = new Set(ownOrdered);   // со старта видны все формы (галочки отмечены)
   fo.querySelectorAll('input[data-ownership]').forEach(cb => {
     cb.addEventListener('change', () => {
       if (ownMode === 'all') {        // режим «вся карта»: галка = добавить/убрать слой одной формы (остальные не трогаются)
@@ -1870,6 +1834,7 @@ function renderSidebar() {
       filterOwnership = new Set(
         Array.from(fo.querySelectorAll('input[data-ownership]:checked')).map(x => x.value)
       );
+      restyleFilteredPolygons();   // снятая форма исчезает с карты прямо сейчас
       buildMarkers();
       if (activeCode) showDetail(activeCode);
     });
@@ -1930,6 +1895,11 @@ function renderBasketPanel() {
   det.classList.remove('detail-empty');
   const items = [...basket].reverse();   // последние добавленные — сверху списка
   const CAP = 300, shown = items.slice(0, CAP);
+  // Подгрузить данные советов (с площадью `a`) для участков подборки — в «Вся карта» Shift+клик грузит только геометрию,
+  // поэтому площади/итог по га без этого пусты. Подгрузили → перерисовали с корректной суммой.
+  const need = [...new Set(items.map(c => c.slice(0, 10)))]
+    .map(code => COUNCILS.find(x => x.code === code)).filter(c => c && !c.parcels && !c._loading);
+  if (need.length) Promise.all(need.map(c => ensureCouncilParcels(c))).then(() => { if (basketView) renderBasketPanel(); });
   // индекс площадей по советам (каждый совет индексируется один раз)
   const idxCache = {};
   const recOf = cad => {
@@ -1951,6 +1921,7 @@ function renderBasketPanel() {
         <h2>📌 Подборка</h2>
         ${items.length ? `<div style="display:flex;gap:6px;flex-shrink:0">
           <button class="btn-export-sm" onclick="document.getElementById('btn-basket-export').click()">📥 Excel</button>
+          <button class="btn-export-sm" onclick="document.getElementById('btn-basket-export-csv').click()">📄 CSV</button>
           <button class="btn-export-sm" title="Очистить подборку" onclick="document.getElementById('btn-basket-clear').click()" style="background:#ff6f61;color:#fff">✕ Сброс</button>
         </div>` : ''}
       </div>
@@ -1977,7 +1948,7 @@ function basketUpdate() {
     const council = COUNCILS.find(c => c.code === code);
     layer.eachLayer(l => {
       if (basket.has(l.feature.properties.cadnum)) {
-        l.setStyle({ color:'#ff0', weight:3, fillOpacity:0.7 });
+        l.setStyle(basketStyle());
       } else {
         layer.resetStyle(l);
       }
@@ -2072,9 +2043,9 @@ document.getElementById('btn-basket-clear').addEventListener('click', () => {
   basket.clear();
   basketUpdate();
 });
-document.getElementById('btn-basket-export').addEventListener('click', async () => {
+async function exportBasket(fmt, btn) {
   if (basket.size === 0) { alert('Подборка пуста'); return; }
-  const btn = document.getElementById('btn-basket-export');
+  btn = btn || document.getElementById('btn-basket-export');
   const orig = btn.textContent;
   btn.disabled = true;
   try {
@@ -2098,15 +2069,16 @@ document.getElementById('btn-basket-export').addEventListener('click', async () 
       if (p) rows.push(parcelsToRows([p], council)[0]);
       else {
         missing++;
-        rows.push({ 'Кадастровый номер': cad, 'Площадь, га': '', 'Регион': '', 'Сельсовет': 'не найден', 'Код сельсовета': rada,
+        rows.push({ 'Кадастровый номер (УКР)': cad, 'Кадастровый номер (РФ)': '', 'Площадь, га': '', 'Регион': '', 'Сельсовет': 'не найден', 'Код сельсовета': rada,
                     'Форма собственности': '', 'Категория земель': '', 'Собственник': '', 'Совладельцев всего': '',
-                    'ІПН собственника': '', 'Дата рег. права собств.': '', 'Арендатор': '', 'ЄДРПОУ арендатора': '',
+                    'ИНН собственника': '', 'Дата рег. права собств.': '', 'Арендатор': '', 'ЕГРПОУ арендатора': '',
                     '№ договора': '', 'Дата регистрации договора': '', 'Окончание договора': '',
                     'Размер аренды, грн': '', '% НГО': '', 'Адрес': '' });
       }
     }
     const stamp = new Date().toISOString().slice(0,10);
-    downloadXlsx(rows, `Подборка_${rows.length}_${stamp}.xlsx`, 'Подборка');
+    if (fmt === 'csv') downloadCsv(rows, `Подборка_${rows.length}_${stamp}.csv`);
+    else downloadXlsx(rows, `Подборка_${rows.length}_${stamp}.xlsx`, 'Подборка');
     if (missing > 0) console.log(`${missing} кадастров не найдены в базе — вписаны пустые строки`);
   } catch (e) {
     alert('Ошибка: ' + (e.message || e));
@@ -2115,11 +2087,13 @@ document.getElementById('btn-basket-export').addEventListener('click', async () 
     btn.textContent = orig;
     btn.disabled = false;
   }
-});
+}
+document.getElementById('btn-basket-export').addEventListener('click', e => exportBasket('xlsx', e.currentTarget));
+document.getElementById('btn-basket-export-csv').addEventListener('click', e => exportBasket('csv', e.currentTarget));
 
 document.getElementById('btn-reset').addEventListener('click', () => {
   filterRenter = filterCategory = filterRegion = filterLeaseYear = filterMz = '';
-  filterOwnership = new Set();
+  filterOwnership = new Set(FILTERS.ownership || []);
   document.getElementById('filter-renter').value = '';
   document.getElementById('filter-category').value = '';
   document.getElementById('filter-mz').value = '';
@@ -2131,7 +2105,8 @@ document.getElementById('btn-reset').addEventListener('click', () => {
     document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => cb.checked = true);
     syncParcelTiles();
   } else {
-    document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => cb.checked = false);
+    document.querySelectorAll('#filter-ownership input[data-ownership]').forEach(cb => cb.checked = true);
+    restyleFilteredPolygons();
     buildMarkers();
     if (activeCode) showDetail(activeCode);
   }
@@ -2218,7 +2193,7 @@ async function navigateToParcel(cadnum) {
     target.bindPopup(buildParcelPopup(cadnum, pdata, council));
     setTimeout(() => target.openPopup(), 600);
     // Briefly highlight
-    target.setStyle({ weight: 3, color: '#ff0' });
+    target.setStyle({ weight: 3, color: OT().basket });
     setTimeout(() => layer.resetStyle(target), 3000);
   } else {
     sr.innerHTML = `<div class="item" style="color:var(--muted)">Кадастр ${cadnum} нет в полигонах</div>`;
@@ -2256,7 +2231,7 @@ search.addEventListener('input', e => {
       </div>
     `).join('') || '<div class="item" style="color:var(--muted)">Сельсовет не найден</div>';
     sr.style.display = 'block';
-    sr.querySelectorAll('.item').forEach((el,i) => {
+    sr.querySelectorAll('.item[data-i]').forEach((el,i) => {   // плашка «не найден» без data-i → не кликается (иначе matches[i] undefined → падение)
       el.addEventListener('click', () => {
         const c = matches[i];
         focusCouncil(c.code);
@@ -2341,7 +2316,7 @@ map.on('click', () => asideLeft.classList.remove('open'));
 buildMarkers();
 
 // Старт: ?z=/?zoom= — сразу «Вся карта» на заданном зуме; иначе «По сёлам» с тем же обзором, привязанным к экрану
-const SAVED_MODE = (function () { try { return localStorage.getItem('kherson_mode'); } catch (e) { return null; } })();
+const SAVED_MODE = (function () { try { return localStorage.getItem(MODE_KEY); } catch (e) { return null; } })();
 if (isFinite(Z_PARAM) && Z_PARAM > 0) {
   map.setView(OVERVIEW_CENTER, Z_PARAM, { animate: false });   // вид сразу
   setOwnMode('all', true);                                     // затем тайлы — грузятся один раз
@@ -2353,7 +2328,7 @@ if (isFinite(Z_PARAM) && Z_PARAM > 0) {
 }
 
 // Технический блок: зум (живой) + версия обновления (бампить при каждом апдейте)
-const BUILD_VERSION = 'v19';
+const BUILD_VERSION = 'v20';
 const techEl = document.createElement('div');
 techEl.id = 'techinfo';
 document.body.appendChild(techEl);
